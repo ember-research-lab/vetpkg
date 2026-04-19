@@ -1,0 +1,50 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  RUST_BACKTRACE: "1"
+  VETPKG_NO_EXTERNAL_NETWORK: "1"
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.toolchain }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        toolchain: [stable, "1.75"]
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: clippy, rustfmt
+      - name: Verify curl present (Unix)
+        if: runner.os != 'Windows'
+        run: curl --version
+      - name: Verify curl present (Windows)
+        if: runner.os == 'Windows'
+        run: curl.exe --version
+      - name: Check zero dependencies
+        shell: bash
+        run: |
+          awk '/^\[dependencies\]/{f=1;next} /^\[/{f=0} f && /[^[:space:]]/ && !/^#/' Cargo.toml > /tmp/deps.txt
+          if [ -s /tmp/deps.txt ]; then
+            echo "ERROR: Cargo.toml [dependencies] must be empty. Found:"
+            cat /tmp/deps.txt
+            exit 1
+          fi
+      - name: Fmt check
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets --no-deps -- -D warnings
+      - name: Build
+        run: cargo build --verbose
+      - name: Test
+        run: cargo test --verbose

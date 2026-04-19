@@ -1,0 +1,29 @@
+[package]
+name = "vetpkg"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Zero-dependency supply-chain security proxy for npm, PyPI, and Cargo"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ember-research-lab/vetpkg"
+readme = "README.md"
+
+[[bin]]
+name = "vetpkg"
+path = "src/main.rs"
+
+[lib]
+name = "vetpkg"
+path = "src/lib.rs"
+
+# vetpkg compiles with ZERO external crate dependencies by design.
+# See docs/plan/00-master-plan.md for rationale. Do not add dependencies here.
+[dependencies]
+
+[dev-dependencies]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+strip = "symbols"
