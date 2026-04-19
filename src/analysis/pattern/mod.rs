@@ -12,6 +12,10 @@
 //! All patterns are literal substrings (case-sensitive for JS/TS/Py/Rust
 //! identifiers). The matcher is in the sibling matcher module.
 
+pub mod matcher;
+
+pub use matcher::{scan_file, FileFindings, Match, TaintPath, VariableFlow, SAME_SCOPE_WINDOW};
+
 use std::path::{Path, PathBuf};
 
 const BUILTIN_SOURCES_JS: &str = include_str!("../../../data/patterns/sources_javascript.txt");

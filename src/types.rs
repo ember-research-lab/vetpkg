@@ -99,6 +99,19 @@ pub enum Signal {
         file: String,
         detail: String,
     },
+    TaintDetection {
+        kind: TaintKind,
+        file: String,
+        detail: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaintKind {
+    SameScopePath,
+    VariableFlow,
+    FileCoOccurrence,
+    LoneSourceOrSink,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,6 +173,12 @@ impl Signal {
                 BuildScriptKind::EnvManipulation => 0.15,
                 BuildScriptKind::SecurityRemoval => 0.20,
                 BuildScriptKind::PatchVersionChange => 0.10,
+            },
+            Signal::TaintDetection { kind, .. } => match kind {
+                TaintKind::SameScopePath => 0.35,
+                TaintKind::VariableFlow => 0.30,
+                TaintKind::FileCoOccurrence => 0.15,
+                TaintKind::LoneSourceOrSink => 0.05,
             },
         }
     }
