@@ -4,6 +4,7 @@
 pub mod adapter;
 pub mod analysis;
 pub mod archive;
+pub mod ci;
 pub mod cli;
 pub mod compress;
 pub mod correlation;
@@ -16,3 +17,4 @@ pub mod platform;
 pub mod signals;
 pub mod store;
 pub mod types;
+pub mod yaml;
