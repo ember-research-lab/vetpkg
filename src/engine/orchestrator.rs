@@ -22,7 +22,7 @@ use crate::engine::suspicion_map::{in_suspicion_window, SuspicionMap, Tier0Resul
 use crate::engine::SecurityEngine;
 use crate::signals::binary_blob::{self, BlobInventory};
 use crate::signals::build_diff::{self, BuildScriptCache};
-use crate::signals::taint;
+use crate::signals::{bin_shadow, infinite_loop, taint};
 use crate::types::{PackageIntel, PolicyConfig, Signal, Verdict};
 use std::path::Path;
 use std::sync::RwLock;
@@ -175,6 +175,24 @@ impl TierOrchestrator {
                 apply_correlation(post_tier1 + taint_raw, &report) - (post_tier1 + taint_raw);
             tier2_score += corr_effect.max(0.0);
             _correlation_report = report;
+
+            // Source-level signals that don't fit the taint source/sink
+            // frame but still want to see every changed file: sabotage-
+            // style infinite loops (colors/faker class) and bin-name
+            // shadowing of system tools.
+            for changed in &diff.changed {
+                let loops = infinite_loop::scan_content(&changed.rel_path, &changed.content);
+                tier2_score += loops.iter().map(|s| s.weight()).sum::<f64>();
+                signals.extend(loops);
+            }
+            let pkg_path = extracted_dir.join("package/package.json");
+            if let Ok(text) = std::fs::read_to_string(&pkg_path) {
+                if let Ok(pkg) = crate::json::parse(&text) {
+                    let shadows = bin_shadow::scan_package_json(&pkg);
+                    tier2_score += shadows.iter().map(|s| s.weight()).sum::<f64>();
+                    signals.extend(shadows);
+                }
+            }
         }
 
         let combined = (tier0_score + tier1_score + tier2_score).min(1.0);
@@ -224,6 +242,13 @@ fn signal_short_label(s: &Signal) -> String {
         Signal::BinaryBlobDetection { kind, path, .. } => format!("Blob({kind:?}:{path})"),
         Signal::BuildScriptDiff { kind, file, .. } => format!("Build({kind:?}:{file})"),
         Signal::TaintDetection { kind, file, .. } => format!("Taint({kind:?}:{file})"),
+        Signal::InfiniteLoop { file, pattern } => format!("Loop({pattern}@{file})"),
+        Signal::BinShadow { bin_name, target } => format!("BinShadow({bin_name}→{target})"),
+        Signal::ResolvedUrlMismatch {
+            name, actual_url, ..
+        } => {
+            format!("Resolved({name}→{actual_url})")
+        }
     }
 }
 
