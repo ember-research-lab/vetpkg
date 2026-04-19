@@ -1,4 +1,6 @@
 pub mod advisory;
+pub mod binary_blob;
+pub mod build_diff;
 pub mod dependency;
 pub mod fresh;
 pub mod hook;
