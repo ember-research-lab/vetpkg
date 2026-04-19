@@ -4,6 +4,7 @@ pub mod fresh;
 pub mod hook;
 pub mod maintainer;
 pub mod popularity;
+pub mod publish_anomaly;
 pub mod typosquat;
 
 use crate::types::{PackageIntel, PolicyConfig, Signal};

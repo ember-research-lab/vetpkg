@@ -21,6 +21,7 @@ impl SecurityEngine {
             Box::new(signals::popularity::PopularityAnomalyCheck),
             Box::new(signals::fresh::FreshPackageCheck),
             Box::new(signals::typosquat::TyposquatCheck::new(top)),
+            Box::new(signals::publish_anomaly::PublishAnomalyCheck),
         ];
         Self { config, checks }
     }
