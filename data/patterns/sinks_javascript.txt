@@ -1,0 +1,24 @@
+# JavaScript/TypeScript sinks — things that send data externally.
+fetch(
+http.request
+https.request
+http.get
+https.get
+axios.post
+axios.put
+axios.get
+axios.patch
+axios.delete
+net.Socket
+net.connect
+dgram.send
+dns.resolve
+dns.lookup
+new WebSocket
+XMLHttpRequest
+navigator.sendBeacon
+node-fetch
+got(
+got.post
+superagent.post
+undici.fetch
