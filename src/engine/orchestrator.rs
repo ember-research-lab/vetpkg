@@ -191,16 +191,39 @@ impl TierOrchestrator {
     }
 
     pub fn log_line(&self, package: &str, version: &str, result: &TierResult) -> String {
+        let tag = match result.verdict {
+            Verdict::Block => "BLOCK",
+            Verdict::Warn => "WARN ",
+            Verdict::Allow => "ALLOW",
+        };
+        let signals = if result.signals.is_empty() {
+            String::new()
+        } else {
+            let names: Vec<String> = result.signals.iter().map(signal_short_label).collect();
+            format!(" [{}]", names.join(","))
+        };
         format!(
-            "[vetpkg] {}@{} t0={:.2} t1={:.2} t2={:.2} total={:.2} verdict={:?}",
-            package,
-            version,
-            result.tier0_score,
-            result.tier1_score,
-            result.tier2_score,
-            result.score,
-            result.verdict
+            "[vetpkg] {tag} {package}@{version} t0={:.2} t1={:.2} t2={:.2} total={:.2}{signals}",
+            result.tier0_score, result.tier1_score, result.tier2_score, result.score
         )
+    }
+}
+
+fn signal_short_label(s: &Signal) -> String {
+    match s {
+        Signal::AdvisoryCheck { id, severity } => format!("Advisory({id}:{severity:?})"),
+        Signal::MaintainerChange { .. } => "MaintainerChange".into(),
+        Signal::HookCheck { stage, reason } => format!("Hook({stage}:{reason})"),
+        Signal::NewDependency { name } => format!("NewDep({name})"),
+        Signal::PopularityAnomaly { .. } => "PopAnomaly".into(),
+        Signal::FreshPackage { age_hours } => format!("Fresh({age_hours:.1}h)"),
+        Signal::Typosquat { matched, distance } => {
+            format!("Typo({matched}:{distance:.3})")
+        }
+        Signal::PublishAnomaly { kind, .. } => format!("Publish({kind:?})"),
+        Signal::BinaryBlobDetection { kind, path, .. } => format!("Blob({kind:?}:{path})"),
+        Signal::BuildScriptDiff { kind, file, .. } => format!("Build({kind:?}:{file})"),
+        Signal::TaintDetection { kind, file, .. } => format!("Taint({kind:?}:{file})"),
     }
 }
 

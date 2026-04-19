@@ -106,7 +106,8 @@ fn check_cadence(history: &[(String, u64)], latest_time: u64) -> Option<Signal> 
 }
 
 fn check_hour(history: &[(String, u64)], latest_time: u64) -> Option<Signal> {
-    if history.len() < 5 {
+    // Need enough history for the distribution to be meaningful.
+    if history.len() < 10 {
         return None;
     }
     let mut counts = [0u32; 24];
@@ -119,22 +120,30 @@ fn check_hour(history: &[(String, u64)], latest_time: u64) -> Option<Signal> {
         counts[hour] += 1;
         total += 1;
     }
-    if total < 5 {
+    if total < 10 {
         return None;
     }
+
+    // Skip if the distribution looks automated/uniform: many distinct hours
+    // used means there's no meaningful "off-hours" pattern to contrast.
+    let distinct_hours = counts.iter().filter(|c| **c > 0).count();
+    if distinct_hours >= 12 {
+        return None;
+    }
+
     let latest_hour = ((latest_time / 3600) % 24) as usize;
-    let freq = counts[latest_hour] as f64 / total as f64;
-    if freq < 0.05 {
-        return Some(Signal::PublishAnomaly {
+    // Require a hard pattern break: the latest hour has never been used.
+    if counts[latest_hour] == 0 {
+        Some(Signal::PublishAnomaly {
             kind: PublishAnomalyKind::HourOfDay,
             detail: format!(
-                "publish hour {}Z has {:.1}% historical frequency",
-                latest_hour,
-                freq * 100.0
+                "publish hour {}Z has no precedent in last {} versions ({} distinct hours historically)",
+                latest_hour, total, distinct_hours
             ),
-        });
+        })
+    } else {
+        None
     }
-    None
 }
 
 fn check_version_sequence(history: &[(String, u64)], latest_version: &str) -> Option<Signal> {

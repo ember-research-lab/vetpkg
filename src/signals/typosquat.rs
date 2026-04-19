@@ -104,12 +104,35 @@ pub fn is_comparable(candidate: &str, corpus_entry: &str) -> bool {
     if shared_dash_family(candidate, corpus_entry) {
         return false;
     }
+    if differs_only_in_delimiters(candidate, corpus_entry) {
+        return false;
+    }
     let min_len = al.min(bl);
     let max_edits = if min_len < 10 { 1 } else { 2 };
     if damerau_levenshtein(candidate, corpus_entry) > max_edits {
         return false;
     }
     true
+}
+
+fn is_delim(c: char) -> bool {
+    matches!(c, '-' | '.' | '_' | '/')
+}
+
+/// Returns true when `a` and `b` differ only in delimiter characters at
+/// the SAME position (substitution, not insertion). Catches deliberate
+/// naming distinctions like object-assign vs object.assign and foo_bar
+/// vs foo-bar. Delimiter INSERTIONS like crossenv vs cross-env (the 2017
+/// typosquat) remain flaggable — dropping a separator is a real attack.
+fn differs_only_in_delimiters(a: &str, b: &str) -> bool {
+    let ac: Vec<char> = a.chars().collect();
+    let bc: Vec<char> = b.chars().collect();
+    if ac == bc || ac.len() != bc.len() {
+        return false;
+    }
+    ac.iter()
+        .zip(bc.iter())
+        .all(|(x, y)| x == y || (is_delim(*x) && is_delim(*y)))
 }
 
 /// If both names share a common prefix ending in `-` and at least 3 chars
@@ -383,6 +406,26 @@ mod tests {
         assert_eq!(damerau_levenshtein("reqeust", "request"), 1);
         assert_eq!(damerau_levenshtein("lodahs", "lodash"), 1);
         assert_eq!(damerau_levenshtein("marhta", "martha"), 1);
+    }
+
+    #[test]
+    fn delimiter_substitution_not_comparable() {
+        assert!(!is_comparable("object-assign", "object.assign"));
+        assert!(!is_comparable("foo_bar", "foo-bar"));
+    }
+
+    #[test]
+    fn delimiter_insertion_still_flagged_as_squat() {
+        // The 2017 crossenv attack dropped the dash from cross-env.
+        // Delimiter insertion/deletion must stay flaggable.
+        assert!(is_comparable("crossenv", "cross-env"));
+    }
+
+    #[test]
+    fn letter_insertion_still_flags() {
+        // These should still be caught as potential squats/lookalikes.
+        assert!(is_comparable("safer-buffer", "safe-buffer"));
+        assert!(is_comparable("https-proxy-agent", "http-proxy-agent"));
     }
 
     #[test]
