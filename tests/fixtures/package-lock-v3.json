@@ -1,0 +1,67 @@
+{
+  "name": "test-project",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "test-project",
+      "version": "1.0.0",
+      "dependencies": {
+        "express": "^4.18.2",
+        "lodash": "^4.17.21",
+        "@vercel/next": "^14.0.0"
+      }
+    },
+    "node_modules/express": {
+      "version": "4.18.2",
+      "resolved": "https://registry.npmjs.org/express/-/express-4.18.2.tgz",
+      "integrity": "sha512-5/PsL6iGPdfQ/lKM1UuielYgv3BUoJfz1aUwU9vHZ+J7gyvwdQXFEBIEIaxeGf0GIcreATNyBExtalisDbuMqQ=="
+    },
+    "node_modules/lodash": {
+      "version": "4.17.21",
+      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+      "integrity": "sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg=="
+    },
+    "node_modules/@vercel/next": {
+      "version": "14.0.0",
+      "resolved": "https://registry.npmjs.org/@vercel/next/-/next-14.0.0.tgz",
+      "integrity": "sha512-somehash"
+    },
+    "node_modules/react": {
+      "version": "18.2.0",
+      "resolved": "https://registry.npmjs.org/react/-/react-18.2.0.tgz",
+      "integrity": "sha512-/3IjMdb2L9QbBdWiW5e3P2/npwMBaU9mHCSCUzNln0ZCYbcfTsGbTJrU/kGemdH2IWmB2ioZ+zkxtmq6g09fGQ=="
+    },
+    "node_modules/requets": {
+      "version": "1.0.0",
+      "resolved": "https://registry.npmjs.org/requets/-/requets-1.0.0.tgz",
+      "integrity": "sha512-typosquat"
+    },
+    "node_modules/axios/node_modules/follow-redirects": {
+      "version": "1.15.6",
+      "resolved": "https://registry.npmjs.org/follow-redirects/-/follow-redirects-1.15.6.tgz",
+      "integrity": "sha512-hash"
+    },
+    "node_modules/axios": {
+      "version": "1.6.0",
+      "resolved": "https://registry.npmjs.org/axios/-/axios-1.6.0.tgz",
+      "integrity": "sha512-hash"
+    },
+    "node_modules/debug": {
+      "version": "4.3.4",
+      "resolved": "https://registry.npmjs.org/debug/-/debug-4.3.4.tgz",
+      "integrity": "sha512-hash"
+    },
+    "node_modules/left-pad": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz",
+      "integrity": "sha512-hash"
+    },
+    "node_modules/expreess": {
+      "version": "0.0.1",
+      "resolved": "https://registry.npmjs.org/expreess/-/expreess-0.0.1.tgz",
+      "integrity": "sha512-typosquat2"
+    }
+  }
+}
