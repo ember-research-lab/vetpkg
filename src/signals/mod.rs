@@ -1,9 +1,11 @@
 pub mod advisory;
+pub mod bin_shadow;
 pub mod binary_blob;
 pub mod build_diff;
 pub mod dependency;
 pub mod fresh;
 pub mod hook;
+pub mod infinite_loop;
 pub mod maintainer;
 pub mod popularity;
 pub mod publish_anomaly;

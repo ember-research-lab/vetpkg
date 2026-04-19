@@ -33,11 +33,17 @@ impl Check for TyposquatCheck {
         if name.len() < 5 {
             return out;
         }
+        if self.corpus.iter().any(|c| c == name) {
+            return out;
+        }
+        // A candidate that is BOTH young (< 30 days) AND not in the popular
+        // corpus earns a stricter comparison: family-prefix skips (e.g.,
+        // twilio-npm vs twilio) don't apply because they're the attack
+        // pattern. Established packages keep the skips so legitimate
+        // namespacing like source-map-js doesn't flag.
+        let fresh = intel.age_hours.map(|h| h < 30.0 * 24.0).unwrap_or(false);
         for popular in &self.corpus {
-            if popular == name {
-                return Vec::new();
-            }
-            if !is_comparable(name, popular) {
+            if !is_comparable_with_context(name, popular, fresh) {
                 continue;
             }
             let sim = jaro_winkler(name, popular) as f32;
@@ -75,6 +81,58 @@ fn unscoped(name: &str) -> &str {
 /// lockfiles (@types/X vs @types/Y, vitest vs vite, source-map-js vs
 /// source-map, platform-prebuilt binaries like @rollup/rollup-linux-x64).
 pub fn is_comparable(candidate: &str, corpus_entry: &str) -> bool {
+    is_comparable_with_context(candidate, corpus_entry, false)
+}
+
+/// Context-aware variant: when the candidate is "fresh" (published in the
+/// last 30 days) and not in the popular corpus, family-prefix skips are
+/// inverted — twilio-npm / cross-env-alt-style suffix squats get through
+/// instead of being silently skipped as siblings of source-map-js.
+pub fn is_comparable_with_context(
+    candidate: &str,
+    corpus_entry: &str,
+    fresh_and_unknown: bool,
+) -> bool {
+    // Fast path for the fresh-unknown twilio-npm class: when a name is both
+    // young (< 30d) and not in the corpus, any family-prefix relationship
+    // to a popular name is itself the suspicious structure, not a
+    // false-positive shape. Skip only the scope-mismatch + delimiter-only
+    // sibling cases; pass everything else straight to JW scoring.
+    if fresh_and_unknown {
+        let c_scope = scope_of(candidate);
+        let p_scope = scope_of(corpus_entry);
+        if let (Some(cs), Some(ps)) = (c_scope, p_scope) {
+            if cs == ps {
+                return false;
+            }
+            let cu = unscoped(candidate);
+            let pu = unscoped(corpus_entry);
+            if cu != pu {
+                return false;
+            }
+            return edit_distance(cs, ps) <= 2;
+        }
+        if c_scope.is_some() != p_scope.is_some() {
+            return false;
+        }
+        if differs_only_in_delimiters(candidate, corpus_entry) {
+            return false;
+        }
+        return family_prefix(candidate, corpus_entry)
+            || family_prefix(corpus_entry, candidate)
+            || shared_dash_family(candidate, corpus_entry)
+            || {
+                let al = candidate.chars().count();
+                let bl = corpus_entry.chars().count();
+                if al.abs_diff(bl) > 2 {
+                    false
+                } else {
+                    let min_len = al.min(bl);
+                    let max_edits = if min_len < 10 { 1 } else { 2 };
+                    damerau_levenshtein(candidate, corpus_entry) <= max_edits
+                }
+            };
+    }
     let c_scope = scope_of(candidate);
     let p_scope = scope_of(corpus_entry);
     match (c_scope, p_scope) {
@@ -98,10 +156,12 @@ pub fn is_comparable(candidate: &str, corpus_entry: &str) -> bool {
     if al.abs_diff(bl) > 2 {
         return false;
     }
-    if family_prefix(candidate, corpus_entry) || family_prefix(corpus_entry, candidate) {
+    if (family_prefix(candidate, corpus_entry) || family_prefix(corpus_entry, candidate))
+        && !fresh_and_unknown
+    {
         return false;
     }
-    if shared_dash_family(candidate, corpus_entry) {
+    if shared_dash_family(candidate, corpus_entry) && !fresh_and_unknown {
         return false;
     }
     if differs_only_in_delimiters(candidate, corpus_entry) {

@@ -14,19 +14,39 @@ impl Default for HookCheck {
 }
 
 fn default_patterns() -> Vec<String> {
-    let risky_1 = "ev".to_string() + "al(";
-    let risky_2 = "child_pro".to_string() + "cess";
-    let risky_3 = "exe".to_string() + "cSync";
-    let risky_4 = "spa".to_string() + "wn(";
+    let eval_paren = "ev".to_string() + "al(";
+    let child_process = "child_pro".to_string() + "cess";
+    let exec_sync = "exe".to_string() + "cSync";
+    let spawn_paren = "spa".to_string() + "wn(";
+    let exec_paren = "exe".to_string() + "c(";
+    let require_buffer = "require(Bu".to_string() + "ffer.from";
+    let require_atob = "require(at".to_string() + "ob(";
+    let import_buffer = "import(Bu".to_string() + "ffer.from";
+    let eval_buffer = "ev".to_string() + "al(Buffer.from";
+    let eval_atob = "ev".to_string() + "al(atob(";
+    let new_function = "new Fu".to_string() + "nction(";
+    let vm_run = "vm.ru".to_string() + "nInThisContext";
+    let vm_run_new = "vm.ru".to_string() + "nInNewContext";
+    let node_unserialize = "unseriali".to_string() + "ze(";
     vec![
         "curl".into(),
         "wget".into(),
         "| sh".into(),
         "| bash".into(),
-        risky_1,
-        risky_2,
-        risky_3,
-        risky_4,
+        eval_paren,
+        child_process,
+        exec_sync,
+        spawn_paren,
+        exec_paren,
+        require_buffer,
+        require_atob,
+        import_buffer,
+        eval_buffer,
+        eval_atob,
+        new_function,
+        vm_run,
+        vm_run_new,
+        node_unserialize,
         "base64 -d".into(),
         "/bin/sh".into(),
         "/bin/bash".into(),
@@ -39,6 +59,20 @@ fn default_patterns() -> Vec<String> {
         "node -e".into(),
         "http://".into(),
         "https://".into(),
+        ".ssh/authorized_keys".into(),
+        ".ssh/config".into(),
+        "~/.ssh/".into(),
+        "/root/.ssh".into(),
+        "/etc/passwd".into(),
+        "/etc/shadow".into(),
+        ".aws/credentials".into(),
+        ".npmrc".into(),
+        ".env".into(),
+        "/.netrc".into(),
+        "monero".into(),
+        "xmrig".into(),
+        "stratum+tcp".into(),
+        "coinhive".into(),
     ]
 }
 
@@ -95,5 +129,47 @@ mod tests {
         };
         let out = HookCheck::default().evaluate(&intel, &PolicyConfig::default());
         assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn ssh_authorized_keys_flags() {
+        let intel = PackageIntel {
+            install_hooks: vec![InstallHook {
+                stage: "postinstall".into(),
+                command: "echo KEY >> ~/.ssh/authorized_keys".into(),
+            }],
+            ..Default::default()
+        };
+        let out = HookCheck::default().evaluate(&intel, &PolicyConfig::default());
+        assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn etc_passwd_read_flags() {
+        let intel = PackageIntel {
+            install_hooks: vec![InstallHook {
+                stage: "preinstall".into(),
+                command: "cat /etc/passwd > /tmp/x".into(),
+            }],
+            ..Default::default()
+        };
+        assert!(!HookCheck::default()
+            .evaluate(&intel, &PolicyConfig::default())
+            .is_empty());
+    }
+
+    #[test]
+    fn buffer_from_require_flags() {
+        let intel = PackageIntel {
+            install_hooks: vec![InstallHook {
+                stage: "postinstall".into(),
+                command:
+                    "node -e \"require(Buffer.from('Y2hpbGRfcHJvY2Vzcw==','base64').toString())\""
+                        .into(),
+            }],
+            ..Default::default()
+        };
+        let out = HookCheck::default().evaluate(&intel, &PolicyConfig::default());
+        assert!(!out.is_empty());
     }
 }

@@ -104,6 +104,19 @@ pub enum Signal {
         file: String,
         detail: String,
     },
+    InfiniteLoop {
+        file: String,
+        pattern: String,
+    },
+    BinShadow {
+        bin_name: String,
+        target: String,
+    },
+    ResolvedUrlMismatch {
+        name: String,
+        expected_registry: String,
+        actual_url: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +193,9 @@ impl Signal {
                 TaintKind::FileCoOccurrence => 0.15,
                 TaintKind::LoneSourceOrSink => 0.05,
             },
+            Signal::InfiniteLoop { .. } => 0.30,
+            Signal::BinShadow { .. } => 0.35,
+            Signal::ResolvedUrlMismatch { .. } => 0.40,
         }
     }
 }
