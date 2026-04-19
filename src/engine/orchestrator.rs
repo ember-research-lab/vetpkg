@@ -14,17 +14,26 @@
 //! This module owns the policy for when Tier 1 runs: only when the metadata
 //! handler placed an entry in the SuspicionMap for that (package, version).
 
+use crate::analysis::manifest::{self, FileManifest};
+use crate::analysis::pattern::{Language, PatternSet};
+use crate::correlation::indexes::{MaintainerIndex, NameIndex, UrlIndex};
+use crate::correlation::{apply_correlation, evaluate, CorrelationReport};
 use crate::engine::suspicion_map::{in_suspicion_window, SuspicionMap, Tier0Result};
 use crate::engine::SecurityEngine;
 use crate::signals::binary_blob::{self, BlobInventory};
 use crate::signals::build_diff::{self, BuildScriptCache};
+use crate::signals::taint;
 use crate::types::{PackageIntel, PolicyConfig, Signal, Verdict};
 use std::path::Path;
+use std::sync::RwLock;
 use std::time::Instant;
 
 pub struct TierOrchestrator {
     pub engine: SecurityEngine,
     pub suspicion: SuspicionMap,
+    pub maintainer_idx: RwLock<MaintainerIndex>,
+    pub name_idx: RwLock<NameIndex>,
+    pub url_idx: RwLock<UrlIndex>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +52,9 @@ impl TierOrchestrator {
         Self {
             engine: SecurityEngine::new(config),
             suspicion: SuspicionMap::new(),
+            maintainer_idx: RwLock::new(MaintainerIndex::default()),
+            name_idx: RwLock::new(NameIndex::default()),
+            url_idx: RwLock::new(UrlIndex::default()),
         }
     }
 
@@ -87,6 +99,30 @@ impl TierOrchestrator {
         prior_build: &BuildScriptCache,
         is_patch_bump: bool,
     ) -> Result<TierResult, String> {
+        self.score_tarball_with_context(
+            package,
+            version,
+            extracted_dir,
+            prior_blobs,
+            prior_build,
+            &FileManifest::default(),
+            &[],
+            is_patch_bump,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn score_tarball_with_context(
+        &self,
+        package: &str,
+        version: &str,
+        extracted_dir: &Path,
+        prior_blobs: &BlobInventory,
+        prior_build: &BuildScriptCache,
+        prior_manifest: &FileManifest,
+        maintainer_emails: &[String],
+        is_patch_bump: bool,
+    ) -> Result<TierResult, String> {
         let start = Instant::now();
         let tier0 = self.suspicion.get(package, version);
         let (tier0_score, mut signals) = match &tier0 {
@@ -105,7 +141,43 @@ impl TierOrchestrator {
         signals.extend(build_scan.signals);
 
         let tier1_score = tier1_blob_score + tier1_build_score;
-        let combined = (tier0_score + tier1_score).min(1.0);
+        let post_tier1 = (tier0_score + tier1_score).min(1.0);
+
+        let mut tier2_score = 0.0;
+        let _correlation_report: CorrelationReport;
+        if post_tier1 >= self.engine.config.allow_threshold
+            && post_tier1 < self.engine.config.block_threshold
+        {
+            let diff = manifest::scan(extracted_dir, prior_manifest)
+                .map_err(|e| format!("manifest scan: {e}"))?;
+            let taint = taint::scan(
+                &diff.changed,
+                &|lang: Language| PatternSet::builtin(lang),
+                diff.is_wholesale_repackage,
+            );
+            let taint_raw = taint::total_taint_score(&taint.signals);
+            signals.extend(taint.signals);
+            tier2_score += taint_raw;
+
+            let extracted_urls = collect_urls_from_findings(&taint.findings);
+            let ecosystem = "npm";
+            let report = evaluate(
+                package,
+                ecosystem,
+                post_tier1 + taint_raw,
+                maintainer_emails,
+                &extracted_urls,
+                &self.maintainer_idx.read().unwrap(),
+                &self.name_idx.read().unwrap(),
+                &self.url_idx.read().unwrap(),
+            );
+            let corr_effect =
+                apply_correlation(post_tier1 + taint_raw, &report) - (post_tier1 + taint_raw);
+            tier2_score += corr_effect.max(0.0);
+            _correlation_report = report;
+        }
+
+        let combined = (tier0_score + tier1_score + tier2_score).min(1.0);
         let verdict = self.engine.verdict(combined);
         Ok(TierResult {
             score: combined,
@@ -113,7 +185,7 @@ impl TierOrchestrator {
             verdict,
             tier0_score,
             tier1_score,
-            tier2_score: 0.0,
+            tier2_score,
             elapsed_ms: start.elapsed().as_millis(),
         })
     }
@@ -136,6 +208,20 @@ impl Default for TierOrchestrator {
     fn default() -> Self {
         Self::new(PolicyConfig::default())
     }
+}
+
+fn collect_urls_from_findings(findings: &[crate::analysis::pattern::FileFindings]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for f in findings {
+        for sink in &f.sink_matches {
+            for url in crate::correlation::url_extract::extract_urls(&sink.line) {
+                if !out.contains(&url) {
+                    out.push(url);
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
