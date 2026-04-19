@@ -1,5 +1,9 @@
+pub mod suspicion_map;
+
 use crate::signals::{self, Check};
 use crate::types::{PackageIntel, PolicyConfig, RiskScore, Verdict};
+
+pub use suspicion_map::{SuspicionMap, Tier0Result};
 
 pub struct SecurityEngine {
     pub config: PolicyConfig,
