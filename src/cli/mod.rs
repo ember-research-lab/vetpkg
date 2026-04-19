@@ -1,6 +1,7 @@
 use crate::types::PolicyConfig;
 
 pub mod audit;
+pub mod audit_ci;
 
 pub fn run(args: Vec<String>) -> Result<u8, String> {
     let mut it = args.into_iter();
@@ -19,7 +20,7 @@ pub fn run(args: Vec<String>) -> Result<u8, String> {
         "status" => status(rest),
         "policy" => policy(),
         "audit" => audit::run(rest),
-        "audit-ci" => Err("audit-ci: implemented in Phase 5".into()),
+        "audit-ci" => audit_ci::run(rest),
         "--help" | "-h" | "help" => {
             print_help();
             Ok(0)
