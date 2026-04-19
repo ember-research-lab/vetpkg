@@ -1,0 +1,50 @@
+# vetpkg configuration — all options with defaults shown.
+#
+# Location:
+#   Unix:    $XDG_CONFIG_HOME/vetpkg/config.toml
+#            (or $HOME/.config/vetpkg/config.toml)
+#   Windows: %APPDATA%\vetpkg\config.toml
+#
+# Run `vetpkg init` to write this file + the default pattern files.
+# Pass --config <path> to the daemon/CLI to use a different location.
+
+# TCP port the proxy listens on. Always binds 127.0.0.1 — vetpkg never
+# listens on an external interface by design.
+port = 9451
+
+# Upstream timeout for individual fetch calls (metadata + OSV + tag-ref).
+# Tarball fetches have a separate higher timeout in src/net/proxy.rs.
+timeout_secs = 30
+
+# Scoring thresholds. A package's combined (Tier 0 + Tier 1 + Tier 2)
+# score is bucketed as:
+#   score < allow_threshold            → Allow (forwarded untouched)
+#   allow_threshold ≤ score < block_threshold → Warn (annotated in
+#                                                SuspicionMap; tarball
+#                                                requests trigger
+#                                                Tier 1 analysis)
+#   score ≥ block_threshold            → Block (version stripped from
+#                                                metadata response;
+#                                                tarball returns 403)
+allow_threshold = 0.3
+block_threshold = 0.6
+
+# Typosquat sensitivity. Jaro-Winkler distance below this threshold, and
+# above zero (exact match), flags the package name as potentially
+# squatted. 0.15 is tuned to catch common edits without over-firing on
+# unrelated packages.
+typosquat_distance_threshold = 0.15
+
+# Packages published less than this many hours ago are flagged fresh.
+# 72h (three days) is the industry-observed window for stolen-token
+# publish-and-abandon operations.
+fresh_package_hours = 72.0
+
+# Upstream registry endpoints. Override only if you run a private
+# mirror; in that case, bear in mind that the mirror becomes a trust
+# anchor. Most users should leave these as-is.
+[upstream]
+npm = "https://registry.npmjs.org"
+pypi = "https://pypi.org"
+cargo_index = "https://index.crates.io"
+cargo_download = "https://static.crates.io"
