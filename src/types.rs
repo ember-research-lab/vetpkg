@@ -89,6 +89,16 @@ pub enum Signal {
         kind: PublishAnomalyKind,
         detail: String,
     },
+    BinaryBlobDetection {
+        kind: BlobKind,
+        path: String,
+        detail: String,
+    },
+    BuildScriptDiff {
+        kind: BuildScriptKind,
+        file: String,
+        detail: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +106,24 @@ pub enum PublishAnomalyKind {
     Cadence,
     HourOfDay,
     VersionSequence,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlobKind {
+    NewHighEntropyInTestDir,
+    NewHighEntropyElsewhere,
+    CompressedInsideTarball,
+    ChangedExistingBlob,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildScriptKind {
+    NewShellExec,
+    ReadFromTestOrData,
+    DecompressTestFixture,
+    EnvManipulation,
+    SecurityRemoval,
+    PatchVersionChange,
 }
 
 impl Signal {
@@ -118,6 +146,20 @@ impl Signal {
                 PublishAnomalyKind::Cadence => 0.15,
                 PublishAnomalyKind::HourOfDay => 0.10,
                 PublishAnomalyKind::VersionSequence => 0.10,
+            },
+            Signal::BinaryBlobDetection { kind, .. } => match kind {
+                BlobKind::NewHighEntropyInTestDir => 0.25,
+                BlobKind::NewHighEntropyElsewhere => 0.15,
+                BlobKind::CompressedInsideTarball => 0.20,
+                BlobKind::ChangedExistingBlob => 0.10,
+            },
+            Signal::BuildScriptDiff { kind, .. } => match kind {
+                BuildScriptKind::NewShellExec => 0.20,
+                BuildScriptKind::ReadFromTestOrData => 0.25,
+                BuildScriptKind::DecompressTestFixture => 0.25,
+                BuildScriptKind::EnvManipulation => 0.15,
+                BuildScriptKind::SecurityRemoval => 0.20,
+                BuildScriptKind::PatchVersionChange => 0.10,
             },
         }
     }
