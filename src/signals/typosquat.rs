@@ -129,10 +129,7 @@ fn shared_dash_family(a: &str, b: &str) -> bool {
             last_dash = Some(i);
         }
     }
-    match last_dash {
-        Some(idx) if idx >= 3 => true,
-        _ => false,
-    }
+    matches!(last_dash, Some(idx) if idx >= 3)
 }
 
 fn edit_distance(a: &str, b: &str) -> usize {
@@ -150,11 +147,11 @@ fn damerau_levenshtein(a: &str, b: &str) -> usize {
         return m;
     }
     let mut d = vec![vec![0usize; n + 1]; m + 1];
-    for i in 0..=m {
-        d[i][0] = i;
+    for (i, row) in d.iter_mut().enumerate().take(m + 1) {
+        row[0] = i;
     }
-    for j in 0..=n {
-        d[0][j] = j;
+    for (j, val) in d[0].iter_mut().enumerate().take(n + 1) {
+        *val = j;
     }
     for i in 1..=m {
         for j in 1..=n {
