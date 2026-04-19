@@ -85,6 +85,17 @@ pub enum Signal {
         matched: String,
         distance: f32,
     },
+    PublishAnomaly {
+        kind: PublishAnomalyKind,
+        detail: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublishAnomalyKind {
+    Cadence,
+    HourOfDay,
+    VersionSequence,
 }
 
 impl Signal {
@@ -103,6 +114,11 @@ impl Signal {
             Signal::PopularityAnomaly { .. } => 0.15,
             Signal::FreshPackage { .. } => 0.2,
             Signal::Typosquat { .. } => 0.35,
+            Signal::PublishAnomaly { kind, .. } => match kind {
+                PublishAnomalyKind::Cadence => 0.15,
+                PublishAnomalyKind::HourOfDay => 0.10,
+                PublishAnomalyKind::VersionSequence => 0.10,
+            },
         }
     }
 }
