@@ -42,7 +42,7 @@ pub struct InstallHook {
     pub command: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Advisory {
     pub id: String,
     pub severity: Severity,
