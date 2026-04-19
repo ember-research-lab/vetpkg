@@ -119,12 +119,23 @@ fn route(method: &str, path: &str) -> HttpResponse {
             .header("Content-Type", "application/json");
     }
     if path.starts_with("/npm/") {
-        return HttpResponse::new(
-            200,
-            "OK",
-            b"{\"phase\":0,\"note\":\"npm adapter arrives in Phase 1\"}\n".to_vec(),
-        )
-        .header("Content-Type", "application/json");
+        return match crate::net::package_path::parse_npm_path(path) {
+            Some(parsed) => {
+                let body = format!(
+                    "{{\"package\":{:?},\"tarball\":{}}}\n",
+                    parsed.package,
+                    parsed
+                        .tarball
+                        .as_ref()
+                        .map(|t| format!("{:?}", t))
+                        .unwrap_or_else(|| "null".to_string()),
+                );
+                HttpResponse::new(200, "OK", body.into_bytes())
+                    .header("Content-Type", "application/json")
+            }
+            None => HttpResponse::new(400, "Bad Request", b"invalid npm package path\n".to_vec())
+                .header("Content-Type", "text/plain"),
+        };
     }
     if path.starts_with("/pip/") {
         return HttpResponse::new(
@@ -218,7 +229,24 @@ mod tests {
         assert!(r.contains("200 OK"));
         let r = client_request(port, "/npm/express");
         assert!(r.contains("200 OK"));
-        assert!(r.contains("phase"));
+        assert!(r.contains("\"package\":\"express\""));
+        assert!(r.contains("\"tarball\":null"));
+
+        let r = client_request(port, "/npm/@vercel%2fnext");
+        assert!(r.contains("200 OK"));
+        assert!(r.contains("\"package\":\"@vercel/next\""));
+
+        let r = client_request(port, "/npm/@vercel/next");
+        assert!(r.contains("200 OK"));
+        assert!(r.contains("\"package\":\"@vercel/next\""));
+
+        let r = client_request(port, "/npm/@vercel/next/-/next-14.0.0.tgz");
+        assert!(r.contains("200 OK"));
+        assert!(r.contains("\"tarball\":\"next-14.0.0.tgz\""));
+
+        let r = client_request(port, "/npm/UPPERCASE");
+        assert!(r.contains("400"));
+
         let r = client_request(port, "/pip/requests");
         assert!(r.contains("501"));
         let r = client_request(port, "/cargo/serde");
