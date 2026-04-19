@@ -1,0 +1,26 @@
+[
+  {
+    "package": "event-stream",
+    "version_pattern": "3.3.6",
+    "id": "MAL-2018-0001",
+    "severity": "Critical",
+    "summary": "Malicious code in event-stream targeting copay bitcoin wallet",
+    "source": "osv"
+  },
+  {
+    "package": "ua-parser-js",
+    "version_pattern": "0.7.29",
+    "id": "MAL-2021-0001",
+    "severity": "Critical",
+    "summary": "Malicious code injected into ua-parser-js to mine cryptocurrency and steal credentials",
+    "source": "osv"
+  },
+  {
+    "package": "colors",
+    "version_pattern": "1.4.44-liberty-2",
+    "id": "MAL-2022-0001",
+    "severity": "High",
+    "summary": "Intentional infinite loop added to colors package by maintainer",
+    "source": "osv"
+  }
+]
