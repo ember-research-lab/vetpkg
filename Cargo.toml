@@ -7,6 +7,9 @@ description = "Zero-dependency supply-chain security proxy for npm, PyPI, and Ca
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ember-research-lab/vetpkg"
 readme = "README.md"
+keywords = ["security", "supply-chain", "proxy", "npm"]
+categories = ["command-line-utilities", "development-tools"]
+publish = false
 
 [[bin]]
 name = "vetpkg"

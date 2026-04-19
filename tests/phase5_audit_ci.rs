@@ -38,9 +38,7 @@ jobs:
     );
     let opts = AuditOptions {
         path: PathBuf::from(td.path()),
-        online: false,
-        strict: false,
-        as_json: false,
+        ..Default::default()
     };
     let report = audit(&opts).unwrap();
     let severities: Vec<Severity> = report.findings.iter().map(|f| f.severity).collect();
@@ -76,9 +74,7 @@ jobs:
     );
     let opts = AuditOptions {
         path: PathBuf::from(td.path()),
-        online: false,
-        strict: false,
-        as_json: false,
+        ..Default::default()
     };
     let report = audit(&opts).unwrap();
     let bad: Vec<_> = report
@@ -104,9 +100,8 @@ fn audit_ci_json_emits_parseable_shape() {
     );
     let opts = AuditOptions {
         path: PathBuf::from(td.path()),
-        online: false,
-        strict: false,
         as_json: true,
+        ..Default::default()
     };
     let report = audit(&opts).unwrap();
     let json = report_as_json(&report);
@@ -121,9 +116,7 @@ fn audit_ci_missing_workflows_dir_errors_clearly() {
     let td = TempDir::new("audit-ci-missing").unwrap();
     let opts = AuditOptions {
         path: PathBuf::from(td.path()),
-        online: false,
-        strict: false,
-        as_json: false,
+        ..Default::default()
     };
     let r = audit(&opts);
     assert!(r.is_err(), "expected error for missing workflows dir");
