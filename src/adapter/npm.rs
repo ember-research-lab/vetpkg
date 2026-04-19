@@ -114,6 +114,130 @@ pub fn extract_install_hooks(version_obj: &JsonValue) -> Vec<InstallHook> {
     out
 }
 
+pub const ABBREVIATED_CONTENT_TYPE: &str = "application/vnd.npm.install-v1+json";
+pub const FULL_CONTENT_TYPE: &str = "application/json";
+
+pub fn wants_abbreviated(accept_header: Option<&str>) -> bool {
+    let Some(accept) = accept_header else {
+        return false;
+    };
+    accept
+        .split(',')
+        .map(|s| s.trim())
+        .any(|media| media_type_matches(media, ABBREVIATED_CONTENT_TYPE))
+}
+
+fn media_type_matches(candidate: &str, target: &str) -> bool {
+    let candidate = candidate.split(';').next().unwrap_or("").trim();
+    candidate.eq_ignore_ascii_case(target)
+}
+
+pub fn to_abbreviated(full: &JsonValue) -> JsonValue {
+    let full_obj = match full.as_object() {
+        Some(o) => o,
+        None => return JsonValue::Object(Vec::new()),
+    };
+
+    let mut out: Vec<(String, JsonValue)> = Vec::new();
+
+    if let Some((_, v)) = full_obj.iter().find(|(k, _)| k == "name") {
+        out.push(("name".into(), v.clone()));
+    }
+    if let Some((_, v)) = full_obj.iter().find(|(k, _)| k == "dist-tags") {
+        out.push(("dist-tags".into(), v.clone()));
+    }
+    if let Some((_, v)) = full_obj.iter().find(|(k, _)| k == "modified") {
+        out.push(("modified".into(), v.clone()));
+    }
+    if let Some((_, versions_v)) = full_obj.iter().find(|(k, _)| k == "versions") {
+        if let Some(versions) = versions_v.as_object() {
+            let stripped: Vec<(String, JsonValue)> = versions
+                .iter()
+                .map(|(ver, vobj)| (ver.clone(), abbreviated_version(vobj)))
+                .collect();
+            out.push(("versions".into(), JsonValue::Object(stripped)));
+        }
+    }
+    JsonValue::Object(out)
+}
+
+fn abbreviated_version(version_obj: &JsonValue) -> JsonValue {
+    let obj = match version_obj.as_object() {
+        Some(o) => o,
+        None => return version_obj.clone(),
+    };
+    const KEEP: &[&str] = &[
+        "name",
+        "version",
+        "dependencies",
+        "optionalDependencies",
+        "peerDependencies",
+        "peerDependenciesMeta",
+        "bundleDependencies",
+        "bundledDependencies",
+        "dist",
+        "deprecated",
+        "engines",
+        "_hasShrinkwrap",
+        "cpu",
+        "os",
+        "hasInstallScript",
+        "directories",
+    ];
+    let mut kept: Vec<(String, JsonValue)> = Vec::new();
+    for (k, v) in obj {
+        if KEEP.iter().any(|n| *n == k) {
+            kept.push((k.clone(), v.clone()));
+        }
+    }
+    JsonValue::Object(kept)
+}
+
+pub fn strip_version(metadata: &JsonValue, version: &str) -> JsonValue {
+    let obj = match metadata.as_object() {
+        Some(o) => o,
+        None => return metadata.clone(),
+    };
+    let mut out: Vec<(String, JsonValue)> = Vec::with_capacity(obj.len());
+    for (k, v) in obj {
+        if k == "versions" {
+            if let Some(vs) = v.as_object() {
+                let filtered: Vec<(String, JsonValue)> = vs
+                    .iter()
+                    .filter(|(ver, _)| ver != version)
+                    .map(|(ver, vv)| (ver.clone(), vv.clone()))
+                    .collect();
+                out.push(("versions".into(), JsonValue::Object(filtered)));
+                continue;
+            }
+        }
+        if k == "time" {
+            if let Some(times) = v.as_object() {
+                let filtered: Vec<(String, JsonValue)> = times
+                    .iter()
+                    .filter(|(ver, _)| ver != version)
+                    .map(|(ver, vv)| (ver.clone(), vv.clone()))
+                    .collect();
+                out.push(("time".into(), JsonValue::Object(filtered)));
+                continue;
+            }
+        }
+        if k == "dist-tags" {
+            if let Some(tags) = v.as_object() {
+                let filtered: Vec<(String, JsonValue)> = tags
+                    .iter()
+                    .filter(|(_, val)| val.as_str() != Some(version))
+                    .map(|(tag, val)| (tag.clone(), val.clone()))
+                    .collect();
+                out.push(("dist-tags".into(), JsonValue::Object(filtered)));
+                continue;
+            }
+        }
+        out.push((k.clone(), v.clone()));
+    }
+    JsonValue::Object(out)
+}
+
 pub fn iso_to_unix(s: &str) -> Option<u64> {
     let year: i64 = s.get(0..4)?.parse().ok()?;
     let month: u32 = s.get(5..7)?.parse().ok()?;
@@ -167,6 +291,120 @@ mod tests {
     fn iso_parses_epoch() {
         assert_eq!(iso_to_unix("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(iso_to_unix("2020-01-15T10:30:00Z"), Some(1579084200));
+    }
+
+    #[test]
+    fn detects_abbreviated_accept() {
+        assert!(wants_abbreviated(Some(
+            "application/vnd.npm.install-v1+json"
+        )));
+        assert!(wants_abbreviated(Some(
+            "application/vnd.npm.install-v1+json; q=1.0"
+        )));
+        assert!(wants_abbreviated(Some(
+            "text/html, application/vnd.npm.install-v1+json, */*"
+        )));
+        assert!(!wants_abbreviated(Some("application/json")));
+        assert!(!wants_abbreviated(Some("*/*")));
+        assert!(!wants_abbreviated(None));
+    }
+
+    #[test]
+    fn abbreviated_strips_expected_fields() {
+        let full = parse(
+            r#"{
+            "name": "tiny",
+            "dist-tags": {"latest": "1.0.0"},
+            "time": {"1.0.0": "2024-01-01T00:00:00Z"},
+            "modified": "2024-01-01T00:00:00Z",
+            "readme": "long readme body",
+            "description": "short",
+            "maintainers": [{"email": "a@b.co"}],
+            "author": {"name": "x"},
+            "repository": {"url": "git://..."},
+            "keywords": ["util"],
+            "homepage": "https://example.com",
+            "bugs": {"url": "https://example.com/bugs"},
+            "versions": {
+                "1.0.0": {
+                    "name": "tiny",
+                    "version": "1.0.0",
+                    "dependencies": {"left-pad": "1.0.0"},
+                    "dist": {"tarball": "https://x/y.tgz", "shasum": "abc"},
+                    "_hasShrinkwrap": false,
+                    "devDependencies": {"mocha": "1.0.0"},
+                    "scripts": {"test": "mocha"},
+                    "readme": "version readme",
+                    "description": "v description",
+                    "author": {"name": "x"},
+                    "repository": {"url": "git://..."},
+                    "keywords": ["util"],
+                    "homepage": "https://example.com",
+                    "bugs": {"url": "https://example.com/bugs"}
+                }
+            }
+        }"#,
+        )
+        .unwrap();
+
+        let abbr = to_abbreviated(&full);
+
+        assert!(abbr.get("name").is_some());
+        assert!(abbr.get("dist-tags").is_some());
+        assert!(abbr.get("modified").is_some());
+        assert!(abbr.get("versions").is_some());
+        assert!(abbr.get("time").is_none());
+        assert!(abbr.get("readme").is_none());
+        assert!(abbr.get("description").is_none());
+        assert!(abbr.get("maintainers").is_none());
+        assert!(abbr.get("author").is_none());
+        assert!(abbr.get("repository").is_none());
+        assert!(abbr.get("keywords").is_none());
+        assert!(abbr.get("homepage").is_none());
+        assert!(abbr.get("bugs").is_none());
+
+        let vobj = abbr.get("versions").unwrap().get("1.0.0").unwrap();
+        assert!(vobj.get("dependencies").is_some());
+        assert!(vobj.get("dist").is_some());
+        assert!(vobj.get("_hasShrinkwrap").is_some());
+        assert!(vobj.get("devDependencies").is_none());
+        assert!(vobj.get("scripts").is_none());
+        assert!(vobj.get("readme").is_none());
+        assert!(vobj.get("description").is_none());
+    }
+
+    #[test]
+    fn strip_version_removes_from_all_maps() {
+        let full = parse(
+            r#"{
+            "name": "tiny",
+            "dist-tags": {"latest": "1.1.0", "bad": "1.0.1"},
+            "time": {"1.0.0": "t0", "1.0.1": "t1", "1.1.0": "t2"},
+            "versions": {
+                "1.0.0": {"name":"tiny","version":"1.0.0"},
+                "1.0.1": {"name":"tiny","version":"1.0.1"},
+                "1.1.0": {"name":"tiny","version":"1.1.0"}
+            }
+        }"#,
+        )
+        .unwrap();
+        let pruned = strip_version(&full, "1.0.1");
+        let versions = pruned.get("versions").unwrap().as_object().unwrap();
+        assert!(versions.iter().all(|(k, _)| k != "1.0.1"));
+        assert_eq!(versions.len(), 2);
+
+        let time = pruned.get("time").unwrap().as_object().unwrap();
+        assert!(time.iter().all(|(k, _)| k != "1.0.1"));
+
+        let tags = pruned.get("dist-tags").unwrap().as_object().unwrap();
+        assert!(tags.iter().all(|(k, _)| k != "bad"));
+        assert!(tags.iter().any(|(k, _)| k == "latest"));
+    }
+
+    #[test]
+    fn abbreviated_on_non_object_returns_empty() {
+        let v = to_abbreviated(&JsonValue::Null);
+        assert_eq!(v, JsonValue::Object(Vec::new()));
     }
 
     #[test]
