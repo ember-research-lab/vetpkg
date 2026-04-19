@@ -167,4 +167,46 @@ mod tests {
         let j = jaro_winkler("MARTHA", "MARHTA");
         assert!((j - 0.961).abs() < 0.01, "jw martha = {j}");
     }
+
+    #[test]
+    fn corpus_has_scoped_entries() {
+        let c = default_corpus();
+        assert!(c.iter().any(|s| s == "@babel/core"));
+        assert!(c.iter().any(|s| s == "@vercel/next"));
+        assert!(c.iter().any(|s| s == "@types/node"));
+        let scoped_count = c.iter().filter(|s| s.starts_with('@')).count();
+        assert!(
+            scoped_count >= 200,
+            "expected 200+ scoped entries, got {}",
+            scoped_count
+        );
+    }
+
+    #[test]
+    fn scoped_typo_flags_against_real_corpus() {
+        let corpus = default_corpus();
+        let chk = TyposquatCheck::new(corpus);
+        let intel = PackageIntel {
+            name: "@bable/core".into(),
+            ..Default::default()
+        };
+        let out = chk.evaluate(&intel, &PolicyConfig::default());
+        assert!(
+            out.iter().any(
+                |s| matches!(s, Signal::Typosquat { matched, .. } if matched == "@babel/core")
+            ),
+            "typosquat should flag @bable/core against @babel/core; got {out:?}"
+        );
+    }
+
+    #[test]
+    fn exact_scoped_match_no_flag() {
+        let corpus = default_corpus();
+        let chk = TyposquatCheck::new(corpus);
+        let intel = PackageIntel {
+            name: "@babel/core".into(),
+            ..Default::default()
+        };
+        assert!(chk.evaluate(&intel, &PolicyConfig::default()).is_empty());
+    }
 }
