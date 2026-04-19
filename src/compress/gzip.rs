@@ -111,4 +111,33 @@ mod tests {
         data.extend_from_slice(&[0u8; 32]);
         assert!(gunzip(&data).is_err());
     }
+
+    #[test]
+    fn gunzip_real_gzip_output() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        if Command::new("gzip")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            eprintln!("skipping: gzip not on PATH");
+            return;
+        }
+        let payload = b"vetpkg gzip end-to-end test payload \
+                        with some repeated repeated repeated repeated content\n";
+        let mut child = Command::new("gzip")
+            .arg("-c")
+            .arg("-n")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.as_mut().unwrap().write_all(payload).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success());
+        let decoded = gunzip(&out.stdout).unwrap();
+        assert_eq!(decoded, payload);
+    }
 }
