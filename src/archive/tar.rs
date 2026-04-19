@@ -160,44 +160,97 @@ fn safe_join(dest: &Path, name: &str) -> Result<PathBuf, String> {
 pub fn build_tar(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut out = Vec::new();
     for (name, body) in entries {
-        let mut header = [0u8; BLOCK];
-        let nb = name.as_bytes();
-        let n = nb.len().min(100);
-        header[..n].copy_from_slice(&nb[..n]);
-        let mode = b"0000644";
-        header[100..107].copy_from_slice(mode);
-        header[107] = 0;
-        let zero7 = b"0000000";
-        header[108..115].copy_from_slice(zero7);
-        header[115] = 0;
-        header[116..123].copy_from_slice(zero7);
-        header[123] = 0;
-        let sz = format!("{:011o}", body.len());
-        let szb = sz.as_bytes();
-        header[124..124 + szb.len()].copy_from_slice(szb);
-        header[135] = 0;
-        let mt = b"00000000000";
-        header[136..147].copy_from_slice(mt);
-        header[147] = 0;
-        header[148..156].fill(b' ');
-        header[156] = b'0';
-        header[257..263].copy_from_slice(b"ustar\x00");
-        header[263..265].copy_from_slice(b"00");
-        let mut sum: u32 = 0;
-        for b in header.iter() {
-            sum = sum.wrapping_add(*b as u32);
-        }
-        let csum = format!("{:06o}", sum);
-        header[148..148 + csum.len()].copy_from_slice(csum.as_bytes());
-        header[154] = 0;
-        header[155] = b' ';
-        out.extend_from_slice(&header);
-        out.extend_from_slice(body);
-        let pad = (BLOCK - (body.len() % BLOCK)) % BLOCK;
-        out.extend(std::iter::repeat(0u8).take(pad));
+        append_regular_entry(&mut out, name, body);
     }
     out.extend(std::iter::repeat(0u8).take(BLOCK * 2));
     out
+}
+
+pub fn build_tar_pax(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (name, body) in entries {
+        if name.len() > 100 {
+            append_pax_path_header(&mut out, name);
+        }
+        append_regular_entry(&mut out, name, body);
+    }
+    out.extend(std::iter::repeat(0u8).take(BLOCK * 2));
+    out
+}
+
+fn append_regular_entry(out: &mut Vec<u8>, name: &str, body: &[u8]) {
+    let mut header = [0u8; BLOCK];
+    let nb = name.as_bytes();
+    let n = nb.len().min(100);
+    header[..n].copy_from_slice(&nb[..n]);
+    fill_common_header(&mut header, body.len(), b'0');
+    finalize_checksum(&mut header);
+    out.extend_from_slice(&header);
+    out.extend_from_slice(body);
+    let pad = (BLOCK - (body.len() % BLOCK)) % BLOCK;
+    out.extend(std::iter::repeat(0u8).take(pad));
+}
+
+fn append_pax_path_header(out: &mut Vec<u8>, path: &str) {
+    let record_body = pax_path_record(path);
+    let mut header = [0u8; BLOCK];
+    let pax_name = b"PaxHeaders/vetpkg";
+    header[..pax_name.len()].copy_from_slice(pax_name);
+    fill_common_header(&mut header, record_body.len(), b'x');
+    finalize_checksum(&mut header);
+    out.extend_from_slice(&header);
+    out.extend_from_slice(&record_body);
+    let pad = (BLOCK - (record_body.len() % BLOCK)) % BLOCK;
+    out.extend(std::iter::repeat(0u8).take(pad));
+}
+
+fn pax_path_record(path: &str) -> Vec<u8> {
+    let suffix = format!(" path={}\n", path);
+    let mut len = suffix.len() + 1;
+    loop {
+        let prefix = len.to_string();
+        let total = prefix.len() + suffix.len();
+        if total == len {
+            let mut record = Vec::with_capacity(total);
+            record.extend_from_slice(prefix.as_bytes());
+            record.extend_from_slice(suffix.as_bytes());
+            return record;
+        }
+        len = total;
+    }
+}
+
+fn fill_common_header(header: &mut [u8; BLOCK], size: usize, typeflag: u8) {
+    let mode = b"0000644";
+    header[100..107].copy_from_slice(mode);
+    header[107] = 0;
+    let zero7 = b"0000000";
+    header[108..115].copy_from_slice(zero7);
+    header[115] = 0;
+    header[116..123].copy_from_slice(zero7);
+    header[123] = 0;
+    let sz = format!("{:011o}", size);
+    let szb = sz.as_bytes();
+    header[124..124 + szb.len()].copy_from_slice(szb);
+    header[135] = 0;
+    let mt = b"00000000000";
+    header[136..147].copy_from_slice(mt);
+    header[147] = 0;
+    header[148..156].fill(b' ');
+    header[156] = typeflag;
+    header[257..263].copy_from_slice(b"ustar\x00");
+    header[263..265].copy_from_slice(b"00");
+}
+
+fn finalize_checksum(header: &mut [u8; BLOCK]) {
+    let mut sum: u32 = 0;
+    for b in header.iter() {
+        sum = sum.wrapping_add(*b as u32);
+    }
+    let csum = format!("{:06o}", sum);
+    header[148..148 + csum.len()].copy_from_slice(csum.as_bytes());
+    header[154] = 0;
+    header[155] = b' ';
 }
 
 #[cfg(test)]
