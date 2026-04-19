@@ -6,6 +6,7 @@ pub mod analysis;
 pub mod archive;
 pub mod cli;
 pub mod compress;
+pub mod correlation;
 pub mod crypto;
 pub mod diff;
 pub mod engine;
