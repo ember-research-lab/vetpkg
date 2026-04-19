@@ -117,6 +117,78 @@ pub fn extract_install_hooks(version_obj: &JsonValue) -> Vec<InstallHook> {
 pub const ABBREVIATED_CONTENT_TYPE: &str = "application/vnd.npm.install-v1+json";
 pub const FULL_CONTENT_TYPE: &str = "application/json";
 
+pub const DEFAULT_DEP_AGE_MAX_FETCHES: usize = 5;
+pub const DEFAULT_DEP_AGE_TIMEOUT_SECS: u32 = 3;
+
+pub fn fetch_metadata(
+    base_url: &str,
+    package_name: &str,
+    timeout_secs: u32,
+) -> Result<JsonValue, String> {
+    let url = format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        encode_name_for_url(package_name)
+    );
+    crate::net::http_client::fetch_json(&url, &[("Accept", FULL_CONTENT_TYPE)], timeout_secs)
+}
+
+pub fn resolve_dep_ages_from_registry(
+    base_url: &str,
+    intel: &mut PackageIntel,
+    max_fetches: usize,
+    timeout_secs: u32,
+) {
+    use std::collections::HashSet;
+    let prior: HashSet<&String> = intel.prior_dependencies.iter().collect();
+    let new_deps: Vec<String> = intel
+        .dependencies
+        .iter()
+        .filter(|d| !prior.contains(*d))
+        .take(max_fetches)
+        .cloned()
+        .collect();
+    if new_deps.is_empty() {
+        return;
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    for dep_name in new_deps {
+        let Ok(metadata) = fetch_metadata(base_url, &dep_name, timeout_secs) else {
+            continue;
+        };
+        let Some(latest) = metadata
+            .get("dist-tags")
+            .and_then(|t| t.get("latest"))
+            .and_then(|s| s.as_str())
+        else {
+            continue;
+        };
+        let Some(time_obj) = metadata.get("time") else {
+            continue;
+        };
+        let Some(published) = time_obj.get(latest).and_then(|s| s.as_str()) else {
+            continue;
+        };
+        let Some(unix) = iso_to_unix(published) else {
+            continue;
+        };
+        let age_hours = (now.saturating_sub(unix) as f64) / 3600.0;
+        intel.dep_ages.insert(dep_name, age_hours);
+    }
+}
+
+pub fn encode_name_for_url(name: &str) -> String {
+    if let Some(rest) = name.strip_prefix('@') {
+        if let Some(slash) = rest.find('/') {
+            return format!("@{}%2f{}", &rest[..slash], &rest[slash + 1..]);
+        }
+    }
+    name.to_string()
+}
+
 pub fn wants_abbreviated(accept_header: Option<&str>) -> bool {
     let Some(accept) = accept_header else {
         return false;
