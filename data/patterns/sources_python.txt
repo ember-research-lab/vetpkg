@@ -1,0 +1,14 @@
+# Python sources.
+os.environ
+os.getenv
+pathlib.Path
+.read_text
+.read_bytes
+subprocess.check_output
+subprocess.run
+subprocess.Popen
+shutil.copy
+.ssh
+.aws
+.config
+open(

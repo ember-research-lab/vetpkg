@@ -1,0 +1,7 @@
+# Rust sources.
+std::env::var
+std::env::vars
+std::fs::read
+std::fs::read_to_string
+std::fs::read_dir
+std::process::Command

@@ -1,0 +1,19 @@
+# Python sinks.
+requests.post
+requests.put
+requests.get
+requests.patch
+requests.delete
+urllib.request.urlopen
+urllib.request.Request
+http.client.HTTPConnection
+http.client.HTTPSConnection
+socket.send
+socket.sendto
+socket.connect
+smtplib.SMTP
+ftplib.FTP
+paramiko
+httpx.post
+httpx.get
+aiohttp.ClientSession

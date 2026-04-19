@@ -1,0 +1,8 @@
+# Rust sinks.
+TcpStream::connect
+UdpSocket::send
+UdpSocket::send_to
+reqwest::
+hyper::
+curl::
+ureq::

@@ -1,0 +1,25 @@
+# JavaScript/TypeScript sources — things that read sensitive data.
+# One literal pattern per line. Comments and blank lines ignored.
+# User overrides live in {config_dir}/patterns/sources_javascript.txt
+# and are merged by default; a line "# replace" in the user file
+# discards these built-ins for that language.
+process.env
+fs.readFileSync
+fs.readFile
+fs.createReadStream
+fs.promises.readFile
+child_process.exec
+child_process.execSync
+child_process.spawn
+os.homedir
+os.hostname
+os.userInfo
+require('os')
+require("os")
+.ssh
+.aws
+.npmrc
+.env
+.netrc
+.docker/config
+.kube/config
