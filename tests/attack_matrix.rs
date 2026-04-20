@@ -582,7 +582,7 @@ fn string_concatenated_url_caught_via_fold() {
         sha256: "x".into(),
         previously_existed: false,
     }];
-    let r = scan(&changed, &|l| PatternSet::builtin(l), false);
+    let r = scan(&changed, &PatternSet::builtin, false);
     assert!(
         total_taint_score(&r.signals) >= 0.35,
         "concat-obfuscated URL should unmask to taint match: {:?}",
