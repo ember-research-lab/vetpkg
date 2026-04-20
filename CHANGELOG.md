@@ -6,11 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Security
+## [0.3.0] — 2026-04-20
 
-Systematic hardening pass across every attacker-reachable parser and
-process-spawn site. None of these were exploited in the wild — they
-were surfaced by a six-agent security audit of the codebase.
+Initial public release. Includes the security hardening pass
+described below.
+
+### Security (hardening pass pre-release)
+
+Systematic hardening across every attacker-reachable parser and
+process-spawn site. Surfaced by a six-agent security audit of the
+codebase; none of these were exploited in the wild.
 
 - **JSON parser**: recursion-depth cap (128), input-size cap (128 MB),
   per-string cap (16 MB), per-collection cap (1M items). Rejects
@@ -72,10 +77,6 @@ were surfaced by a six-agent security audit of the codebase.
 New unit tests cover each fix with positive and negative cases: 309
 library unit tests total (was 291) with the six regression fixtures
 directly exercising the most serious findings.
-
-## [0.3.0] — 2026-04-19
-
-Initial public release.
 
 ### Added
 
