@@ -18,7 +18,7 @@ impl SecurityEngine {
         let checks: Vec<Box<dyn Check + Send + Sync>> = vec![
             Box::new(signals::advisory::AdvisoryCheck),
             Box::new(signals::maintainer::MaintainerChangeCheck),
-            Box::new(signals::hook::HookCheck::default()),
+            Box::<signals::hook::HookCheck>::default(),
             Box::new(signals::dependency::NewDependencyCheck),
             Box::new(signals::popularity::PopularityAnomalyCheck),
             Box::new(signals::fresh::FreshPackageCheck),
