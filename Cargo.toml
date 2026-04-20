@@ -1,6 +1,6 @@
 [package]
 name = "vetpkg"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.75"
 description = "Zero-dependency supply-chain security proxy for npm, PyPI, and Cargo"

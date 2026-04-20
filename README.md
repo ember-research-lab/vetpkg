@@ -46,7 +46,7 @@ Linux, macOS, Windows. CI runs every commit against `ubuntu-latest × macos-late
 
 ```bash
 vetpkg daemon
-# vetpkg 0.2.0 listening on http://127.0.0.1:9451
+# vetpkg 0.3.0 listening on http://127.0.0.1:9451
 #   npm    /npm/*     active
 #   pip    /pip/*     adapter ready, proxy route pending
 #   cargo  /cargo/*   adapter ready, proxy route pending
