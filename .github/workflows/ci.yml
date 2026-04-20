@@ -2,6 +2,7 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
 
@@ -57,6 +58,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -77,22 +80,54 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+      - name: Install aarch64 linker (linux only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
-      - name: Compute SHA-256
+      - name: Package artifact
+        id: pkg
         shell: bash
         run: |
           cd "target/${{ matrix.target }}/release"
-          if [ "${{ runner.os }}" = "Windows" ]; then BIN=vetpkg.exe; else BIN=vetpkg; fi
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "$BIN" > "$BIN.sha256"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            BIN=vetpkg.exe
+            OUT="vetpkg-${{ matrix.target }}.exe"
           else
-            shasum -a 256 "$BIN" > "$BIN.sha256"
+            BIN=vetpkg
+            OUT="vetpkg-${{ matrix.target }}"
           fi
-      - name: Upload artifact
+          cp "$BIN" "$OUT"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$OUT" > "$OUT.sha256"
+          else
+            shasum -a 256 "$OUT" > "$OUT.sha256"
+          fi
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          echo "path=target/${{ matrix.target }}/release" >> "$GITHUB_OUTPUT"
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: vetpkg-${{ matrix.target }}
           path: |
-            target/${{ matrix.target }}/release/vetpkg*
-            target/${{ matrix.target }}/release/*.sha256
+            ${{ steps.pkg.outputs.path }}/${{ steps.pkg.outputs.out }}
+            ${{ steps.pkg.outputs.path }}/${{ steps.pkg.outputs.out }}.sha256
+      - name: Attach to GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF##*/}"
+          cd "${{ steps.pkg.outputs.path }}"
+          # Idempotent: create a draft release if it doesn't yet exist.
+          # Matrix jobs race on this — the first wins, others no-op.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+                 --title "$TAG" --draft --generate-notes
+          gh release upload "$TAG" \
+            "${{ steps.pkg.outputs.out }}" \
+            "${{ steps.pkg.outputs.out }}.sha256" \
+            --repo "$GITHUB_REPOSITORY" --clobber
