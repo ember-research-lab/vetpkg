@@ -120,6 +120,10 @@ fn clean_package_scores_allow() {
 
 #[test]
 fn proxy_never_contacts_external_hosts() {
+    // Verify the VETPKG_NO_EXTERNAL_NETWORK guard is honored by the proxy:
+    // when set, a request that would require upstream fetch must be refused
+    // with a clear error rather than silently contacting the registry.
+    std::env::set_var("VETPKG_NO_EXTERNAL_NETWORK", "1");
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let stop = Arc::new(AtomicBool::new(false));
@@ -134,9 +138,13 @@ fn proxy_never_contacts_external_hosts() {
         .unwrap();
     let mut buf = String::new();
     s.read_to_string(&mut buf).unwrap();
-    assert!(buf.contains("200 OK"), "response: {buf}");
+    assert!(
+        buf.contains("VETPKG_NO_EXTERNAL_NETWORK") || buf.contains("refusing to contact"),
+        "proxy should refuse upstream fetch under guard, got: {buf}"
+    );
 
     stop.store(true, Ordering::Relaxed);
     let _ = TcpStream::connect(("127.0.0.1", port));
     let _ = handle.join();
+    std::env::remove_var("VETPKG_NO_EXTERNAL_NETWORK");
 }

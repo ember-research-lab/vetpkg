@@ -89,7 +89,7 @@ fn fifty_plus_packages_under_budget() {
             sha256: "x".into(),
             previously_existed: false,
         }];
-        let r = scan(&changed, &|l| PatternSet::builtin(l), false);
+        let r = scan(&changed, &PatternSet::builtin, false);
         let score = total_taint_score(&r.signals);
         if score >= FP_BUDGET {
             failures.push((
