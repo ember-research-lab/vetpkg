@@ -82,7 +82,7 @@ fn stream_from_curl<W: Write>(
         ));
     }
     let curl = resolve_curl()?;
-    let mut child = Command::new(&curl)
+    let mut child = Command::new(curl)
         .arg("-sS")
         .arg("-i")
         .arg("-L")

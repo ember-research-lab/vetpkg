@@ -36,7 +36,7 @@ pub fn http_get_with_timeout(
         validate_header(k, v)?;
     }
     let curl = resolve_curl()?;
-    let mut cmd = Command::new(&curl);
+    let mut cmd = Command::new(curl);
     cmd.arg("-sS")
         .arg("-i")
         .arg("-L")
@@ -213,7 +213,7 @@ fn http_get_via_curl(
         validate_header(k, v)?;
     }
     let curl = resolve_curl()?;
-    let mut cmd = Command::new(&curl);
+    let mut cmd = Command::new(curl);
     cmd.arg("-sS")
         .arg("-i")
         .arg("-L")
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn post_json_round_trips_on_localhost() {
-        use std::net::TcpListener;
+        use std::net::{Shutdown, TcpListener};
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         thread::spawn(move || {
@@ -483,6 +483,9 @@ mod tests {
             );
             s.write_all(resp.as_bytes()).unwrap();
             s.write_all(body).unwrap();
+            let _ = s.shutdown(Shutdown::Write);
+            let mut discard = Vec::new();
+            let _ = s.read_to_end(&mut discard);
         });
         let url = format!("http://127.0.0.1:{port}/v1/query");
         let v = post_json(&url, &[("Content-Type", "application/json")], b"{}", 5).unwrap();

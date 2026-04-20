@@ -186,7 +186,7 @@ impl TierOrchestrator {
                 signals.extend(loops);
             }
             let pkg_path = extracted_dir.join("package/package.json");
-            if let Ok(text) = std::fs::read_to_string(&pkg_path) {
+            if let Ok(text) = std::fs::read_to_string(pkg_path) {
                 if let Ok(pkg) = crate::json::parse(&text) {
                     let shadows = bin_shadow::scan_package_json(&pkg);
                     tier2_score += shadows.iter().map(|s| s.weight()).sum::<f64>();
