@@ -1,5 +1,5 @@
 use crate::json::{parse, JsonValue};
-use crate::platform::{is_safe_header_value, is_safe_url, resolve_curl};
+use crate::platform::{is_safe_header_value, is_safe_url, resolve_curl, sanitize_curl_env};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::process::{Command, Stdio};
@@ -37,6 +37,7 @@ pub fn http_get_with_timeout(
     }
     let curl = resolve_curl()?;
     let mut cmd = Command::new(curl);
+    sanitize_curl_env(&mut cmd);
     cmd.arg("-sS")
         .arg("-i")
         .arg("-L")
@@ -214,6 +215,7 @@ fn http_get_via_curl(
     }
     let curl = resolve_curl()?;
     let mut cmd = Command::new(curl);
+    sanitize_curl_env(&mut cmd);
     cmd.arg("-sS")
         .arg("-i")
         .arg("-L")

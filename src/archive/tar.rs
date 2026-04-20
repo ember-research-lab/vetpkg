@@ -4,6 +4,13 @@ use std::path::{Component, Path, PathBuf};
 
 const BLOCK: usize = 512;
 
+/// Hard caps on tarball extraction. A legitimate npm package (even sharp
+/// with its prebuilds) has under 10 000 entries and weighs a few dozen MB.
+/// These ceilings protect against tarbombs without affecting real traffic.
+pub const MAX_TAR_ENTRIES: usize = 100_000;
+pub const MAX_TAR_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
+pub const MAX_TAR_ENTRY_BYTES: u64 = 256 * 1024 * 1024;
+
 pub fn extract_tar(data: &[u8], dest: &Path) -> Result<Vec<PathBuf>, String> {
     fs::create_dir_all(dest).map_err(|e| format!("create {:?}: {e}", dest))?;
     let dest = dest
@@ -13,6 +20,8 @@ pub fn extract_tar(data: &[u8], dest: &Path) -> Result<Vec<PathBuf>, String> {
     let mut out = Vec::new();
     let mut pos = 0;
     let mut long_name: Option<String> = None;
+    let mut entries_seen: usize = 0;
+    let mut total_bytes: u64 = 0;
 
     while pos + BLOCK <= data.len() {
         let header = &data[pos..pos + BLOCK];
@@ -20,7 +29,24 @@ pub fn extract_tar(data: &[u8], dest: &Path) -> Result<Vec<PathBuf>, String> {
             pos += BLOCK;
             continue;
         }
+        entries_seen += 1;
+        if entries_seen > MAX_TAR_ENTRIES {
+            return Err(format!(
+                "tar entries exceed {MAX_TAR_ENTRIES} — refusing tarbomb"
+            ));
+        }
         let size = parse_octal(&header[124..136])?;
+        if size > MAX_TAR_ENTRY_BYTES {
+            return Err(format!(
+                "tar entry {size} bytes exceeds {MAX_TAR_ENTRY_BYTES}"
+            ));
+        }
+        total_bytes = total_bytes.saturating_add(size);
+        if total_bytes > MAX_TAR_TOTAL_BYTES {
+            return Err(format!(
+                "tar total bytes exceed {MAX_TAR_TOTAL_BYTES} — refusing tarbomb"
+            ));
+        }
         let typeflag = header[156];
         let mut name = read_name(header)?;
         if let Some(prefix) = read_prefix(header)? {
@@ -34,8 +60,12 @@ pub fn extract_tar(data: &[u8], dest: &Path) -> Result<Vec<PathBuf>, String> {
             name = ln;
         }
 
+        // `size` is bounded above by MAX_TAR_ENTRY_BYTES (256 MB) so the
+        // `as usize` cast is safe on 32-bit targets too (256 MB < 2 GB).
         pos += BLOCK;
-        let body_end = pos + size as usize;
+        let body_end = pos
+            .checked_add(size as usize)
+            .ok_or_else(|| "tar body_end overflow".to_string())?;
         if body_end > data.len() {
             return Err("tar truncated body".into());
         }
@@ -66,6 +96,10 @@ pub fn extract_tar(data: &[u8], dest: &Path) -> Result<Vec<PathBuf>, String> {
                 let target = safe_join(&dest, &name)?;
                 fs::create_dir_all(&target).map_err(|e| format!("mkdir {:?}: {e}", target))?;
             }
+            // b'1' hardlink, b'2' symlink, b'3'/b'4' char/block device,
+            // b'6' FIFO — silently dropped. A security-focused extraction
+            // refuses to materialize these types; legitimate npm tarballs
+            // never contain them.
             _ => {}
         }
 
@@ -118,6 +152,11 @@ fn parse_pax_path(body: &[u8]) -> Option<String> {
 }
 
 fn iter_pax_records(s: &str) -> impl Iterator<Item = &str> {
+    // PAX record format (POSIX.1-2001): "<len> <key>=<value>\n"
+    // where <len> is the total byte length of the record INCLUDING the
+    // length digits, the space, and the trailing newline. A malicious
+    // tarball can set a `len` so small or so large that naïve slicing
+    // panics — every bounds check below is load-bearing.
     struct It<'a> {
         s: &'a str,
     }
@@ -130,7 +169,21 @@ fn iter_pax_records(s: &str) -> impl Iterator<Item = &str> {
             }
             let space = s.find(' ')?;
             let len: usize = s[..space].parse().ok()?;
-            if len == 0 || len > s.len() {
+            // `len` must be at least space + 2 (the space itself plus the
+            // trailing newline) and must not exceed the remaining bytes;
+            // must also be large enough for s[space+1..len-1] to be a
+            // valid (possibly empty) range.
+            if len > s.len() || space + 2 > len {
+                return None;
+            }
+            // Guard against non-char boundary panics in case of a
+            // multi-byte UTF-8 character straddling the declared end.
+            if !s.is_char_boundary(space + 1) || !s.is_char_boundary(len - 1) {
+                return None;
+            }
+            // Strictly require the record to end with the canonical '\n'
+            // to prevent adjacent-record smuggling via miscounted len.
+            if s.as_bytes()[len - 1] != b'\n' {
                 return None;
             }
             let record_with_nl = &s[space + 1..len - 1];
@@ -284,6 +337,40 @@ mod tests {
         assert_eq!(
             parse_pax_path(body),
             Some("long-name-from-pax/example.js".to_string())
+        );
+    }
+
+    #[test]
+    fn pax_record_with_corrupt_length_does_not_panic() {
+        // `len` claimed as 2, but a real record needs at least space+2.
+        // Before the fix, `s[space+1..len-1]` would compute `[2..1]` and
+        // panic. With the fix it yields None and terminates iteration.
+        let body = b"2 ab\n";
+        assert_eq!(parse_pax_path(body), None);
+    }
+
+    #[test]
+    fn pax_record_without_trailing_newline_rejected() {
+        // `len=3` points at 'b' (not '\n') — defeats the smuggling path
+        // where a malicious tar appends a second path= record.
+        let body = b"3 abc";
+        assert_eq!(parse_pax_path(body), None);
+    }
+
+    #[test]
+    fn tar_entry_count_cap_enforced() {
+        // Construct a tar with MAX_TAR_ENTRIES + 5 empty files. Whichever
+        // cap fires first is acceptable — the point is that the extractor
+        // refuses to run past its stated limits, not which limit wins.
+        let entries: Vec<(&str, &[u8])> = (0..MAX_TAR_ENTRIES + 5)
+            .map(|_| ("x", b"" as &[u8]))
+            .collect();
+        let tar = build_tar(&entries);
+        let td = TempDir::new("vetpkg-tar-bomb").unwrap();
+        let err = extract_tar(&tar, td.path()).unwrap_err();
+        assert!(
+            err.contains("MAX_TAR_ENTRIES") || err.contains("tarbomb") || err.contains("total"),
+            "expected tarbomb rejection, got: {err}"
         );
     }
 }

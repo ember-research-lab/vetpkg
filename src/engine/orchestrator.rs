@@ -161,16 +161,30 @@ impl TierOrchestrator {
 
             let extracted_urls = collect_urls_from_findings(&taint.findings);
             let ecosystem = "npm";
+            // Recover from a poisoned lock by reading `into_inner()` — the
+            // content is still a valid index snapshot; refusing to serve
+            // all subsequent requests just because a different thread
+            // panicked during an index update is a poisoned-lock cascade
+            // we explicitly don't want in a long-running proxy daemon.
+            let maint_guard = self
+                .maintainer_idx
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            let name_guard = self.name_idx.read().unwrap_or_else(|e| e.into_inner());
+            let url_guard = self.url_idx.read().unwrap_or_else(|e| e.into_inner());
             let report = evaluate(
                 package,
                 ecosystem,
                 post_tier1 + taint_raw,
                 maintainer_emails,
                 &extracted_urls,
-                &self.maintainer_idx.read().unwrap(),
-                &self.name_idx.read().unwrap(),
-                &self.url_idx.read().unwrap(),
+                &maint_guard,
+                &name_guard,
+                &url_guard,
             );
+            drop(maint_guard);
+            drop(name_guard);
+            drop(url_guard);
             let corr_effect =
                 apply_correlation(post_tier1 + taint_raw, &report) - (post_tier1 + taint_raw);
             tier2_score += corr_effect.max(0.0);

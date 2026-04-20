@@ -82,9 +82,19 @@ impl Check for HookCheck {
     }
 
     fn evaluate(&self, intel: &PackageIntel, _config: &PolicyConfig) -> Vec<Signal> {
+        // Cap the command string before lowercasing. Legitimate install
+        // hooks are a few hundred characters; 8 KB is an order of
+        // magnitude of headroom. Above that, we scan the truncated
+        // prefix (which is enough to catch every pattern we ship).
+        const MAX_HOOK_BYTES: usize = 8 * 1024;
         let mut out = Vec::new();
         for h in &intel.install_hooks {
-            let lower = h.command.to_lowercase();
+            let cmd = if h.command.len() > MAX_HOOK_BYTES {
+                &h.command[..MAX_HOOK_BYTES]
+            } else {
+                h.command.as_str()
+            };
+            let lower = cmd.to_lowercase();
             for p in &self.patterns {
                 if lower.contains(&p.to_lowercase()) {
                     out.push(Signal::HookCheck {

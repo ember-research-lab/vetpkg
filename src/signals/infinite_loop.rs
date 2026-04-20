@@ -14,9 +14,16 @@
 use crate::types::Signal;
 
 pub fn scan_content(file: &str, content: &str) -> Vec<Signal> {
+    // Per-line cap: a minified payload with a single 10 MB line isn't
+    // going to contain legitimate `while(true)` anyway, and skipping
+    // bounds the whitespace-strip allocation.
+    const MAX_LINE_BYTES: usize = 64 * 1024;
     let mut out = Vec::new();
     let mut in_block_comment = false;
     for raw in content.lines() {
+        if raw.len() > MAX_LINE_BYTES {
+            continue;
+        }
         let cleaned = strip_comments(raw, &mut in_block_comment);
         if cleaned.trim().is_empty() {
             continue;
