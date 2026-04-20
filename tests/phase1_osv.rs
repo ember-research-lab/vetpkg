@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{Shutdown, TcpListener};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -48,6 +48,9 @@ impl MockOsv {
                     );
                     let _ = s.write_all(header.as_bytes());
                     let _ = s.write_all(response_json.as_bytes());
+                    let _ = s.shutdown(Shutdown::Write);
+                    let mut discard = Vec::new();
+                    let _ = s.read_to_end(&mut discard);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));

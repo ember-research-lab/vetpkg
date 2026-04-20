@@ -3,7 +3,7 @@
 //! verify scoring behaviour.
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -110,6 +110,9 @@ impl MockRegistry {
                     );
                     let _ = s.write_all(head.as_bytes());
                     let _ = s.write_all(&body);
+                    let _ = s.shutdown(Shutdown::Write);
+                    let mut discard = Vec::new();
+                    let _ = s.read_to_end(&mut discard);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));

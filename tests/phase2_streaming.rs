@@ -4,7 +4,7 @@
 //! bounded-memory sink and asserts byte-identical content + correct size.
 
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{Shutdown, TcpListener};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -47,6 +47,9 @@ fn spawn_mock(payload: Vec<u8>) -> (u16, Arc<AtomicBool>, thread::JoinHandle<()>
                 );
                 s.write_all(header.as_bytes()).unwrap();
                 s.write_all(&payload).unwrap();
+                let _ = s.shutdown(Shutdown::Write);
+                let mut discard = Vec::new();
+                let _ = s.read_to_end(&mut discard);
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(5));

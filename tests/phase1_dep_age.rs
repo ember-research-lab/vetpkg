@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{Shutdown, TcpListener};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -60,6 +60,9 @@ impl MockRegistry {
                         );
                     s.write_all(header.as_bytes()).unwrap();
                     s.write_all(body.as_bytes()).unwrap();
+                    let _ = s.shutdown(Shutdown::Write);
+                    let mut discard = Vec::new();
+                    let _ = s.read_to_end(&mut discard);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(std::time::Duration::from_millis(10));
