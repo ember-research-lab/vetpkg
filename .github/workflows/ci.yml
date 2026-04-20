@@ -53,10 +53,36 @@ jobs:
       - name: Test
         run: cargo test --verbose
 
+  # Single job creates the draft release. Matrix jobs only upload.
+  # Previously, `release-build` matrix jobs raced to call `gh release
+  # create` — the check-then-create pattern had a TOCTOU window, so two
+  # jobs would create duplicate drafts (10 assets went to one, the
+  # other was left empty). Serialising creation here guarantees a
+  # single draft per tag.
+  release-create:
+    name: release / create draft
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - name: Create draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF##*/}"
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" --draft --generate-notes
+          fi
+
   release-build:
     name: release / ${{ matrix.target }}
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
+    needs: release-create
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -122,11 +148,8 @@ jobs:
         run: |
           TAG="${GITHUB_REF##*/}"
           cd "${{ steps.pkg.outputs.path }}"
-          # Idempotent: create a draft release if it doesn't yet exist.
-          # Matrix jobs race on this — the first wins, others no-op.
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-                 --title "$TAG" --draft --generate-notes
+          # `release-create` has already produced the draft. We only
+          # upload. --clobber allows re-runs to overwrite the same asset.
           gh release upload "$TAG" \
             "${{ steps.pkg.outputs.out }}" \
             "${{ steps.pkg.outputs.out }}.sha256" \
