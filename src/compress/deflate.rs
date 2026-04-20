@@ -109,6 +109,9 @@ fn inflate_stored(r: &mut BitReader, out: &mut Vec<u8>) -> Result<(), String> {
             len, nlen
         ));
     }
+    if out.len().saturating_add(len) > MAX_OUTPUT {
+        return Err(format!("deflate output would exceed {MAX_OUTPUT} bytes"));
+    }
     let slice = r.read_raw_bytes_aligned(len)?;
     out.extend_from_slice(slice);
     Ok(())
@@ -320,6 +323,12 @@ fn inflate_block(
     dist: &HuffmanTable,
 ) -> Result<(), String> {
     loop {
+        // Enforce MAX_OUTPUT on every symbol to bound decompression bombs
+        // that use overlapping back-references (legal per RFC 1951 §3.2.3)
+        // to produce arbitrary expansion inside a single block.
+        if out.len() > MAX_OUTPUT {
+            return Err(format!("deflate output exceeded {MAX_OUTPUT} bytes"));
+        }
         let sym = lit.decode(r)?;
         match sym {
             0..=255 => out.push(sym as u8),
@@ -347,6 +356,9 @@ fn inflate_block(
                         distance,
                         out.len()
                     ));
+                }
+                if out.len().saturating_add(length) > MAX_OUTPUT {
+                    return Err(format!("deflate output would exceed {MAX_OUTPUT} bytes"));
                 }
                 let start = out.len() - distance;
                 for k in 0..length {
