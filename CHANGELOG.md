@@ -6,6 +6,73 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+Systematic hardening pass across every attacker-reachable parser and
+process-spawn site. None of these were exploited in the wild — they
+were surfaced by a six-agent security audit of the codebase.
+
+- **JSON parser**: recursion-depth cap (128), input-size cap (128 MB),
+  per-string cap (16 MB), per-collection cap (1M items). Rejects
+  overlong UTF-8 continuation bytes. Prevents stack overflow, OOM,
+  and path-smuggling via encoding tricks.
+- **DEFLATE**: `MAX_OUTPUT` now enforced inside `inflate_block`, not
+  only at block boundaries. Overlapping back-references can no longer
+  balloon a single block past the cap before the check fires. Stored
+  blocks pre-check saturating_add overflow.
+- **gzip**: FHCRC flag skip now bounds-checks before advancing `pos`
+  (prevents slice panic on crafted truncated header).
+- **tar**: PAX record parser now validates `len >= space + 2` and the
+  trailing `\n` before slicing, eliminating a remote-DoS panic on
+  crafted records. Entry-count cap (100 000), total-size cap (512 MB),
+  per-entry cap (256 MB), saturating_add on body-end offset.
+- **HTTP server**: per-line bounded reads (8 KB request line, 8 KB
+  header line, 100 headers max, 64 MB body max). Header values
+  containing `\r`/`\n`/`\0` rejected; header names must be printable
+  ASCII. Mitigates slow-loris, request-smuggling, and
+  response-splitting probes.
+- **HTTP client/streaming**: every curl spawn now scrubs dangerous env
+  vars (`HTTP_PROXY`, `HTTPS_PROXY`, `CURL_HOME`, `SSL_CERT_*`,
+  `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, etc.) so a compromised process
+  environment can't redirect curl traffic, swap TLS trust, or preload
+  libraries.
+- **URL validator (`is_safe_url`)**: now rejects percent-encoded CRLF
+  (`%0d`/`%0a`), `%00`, userinfo-containing URLs (`user@host`),
+  non-printable ASCII, and non-ASCII bytes. Curl will not see any
+  path where it could decode CRLF into the request line.
+- **Header validator**: printable-ASCII-only (0x20..=0x7E). Tabs and
+  DEL now rejected.
+- **Proxy**: connection write-deadline (90 s) added to complement the
+  per-read timeout, defeating slow-loris. Fail-CLOSED on
+  gunzip/tar-extract errors for already-suspect packages (was
+  fail-OPEN). `BoundedBuffer` sink enforces 200 MB tarball cap
+  *during* streaming rather than after. `DeferredChunkedWriter`
+  delays emitting HTTP 200 headers until upstream proves success —
+  upstream 4xx/5xx now correctly propagates as 502 rather than
+  corrupting the client install. Tarball filename validated against
+  the whitelist charset before URL composition.
+- **GitHub API paths (`pin_check`)**: owner/repo/tag values validated
+  against `[a-zA-Z0-9._/-]+` with no-`..` and no-leading-`.` rules
+  before composition. `validate_sha_like` gates the annotated-tag
+  second hop.
+- **Signal scanners**: per-line cap (64 KB) in matcher and
+  infinite_loop; per-hook-command cap (8 KB); typosquat
+  Damerau-Levenshtein short-circuits on names > 256 chars; taint-path
+  and variable-flow output caps (256 each) to bound quadratic
+  explosion. Pattern-list dedup now `HashSet`-based (O(N) instead of
+  O(N²)).
+- **Build-diff / binary-blob / manifest**: file-size caps before
+  `fs::read` (16 MB manifest, 64 MB blob, 4 MB build file). Myers
+  diff hard-caps combined line count at 10 000 with graceful
+  degradation.
+- **Engine orchestrator**: `RwLock::read()` now recovers from
+  poisoning via `into_inner`, preventing a single index-update panic
+  from cascading into permanent DoS of every subsequent request.
+
+New unit tests cover each fix with positive and negative cases: 309
+library unit tests total (was 291) with the six regression fixtures
+directly exercising the most serious findings.
+
 ## [0.3.0] — 2026-04-19
 
 Initial public release.

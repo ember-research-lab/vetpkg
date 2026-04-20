@@ -7,7 +7,7 @@
 //! For localhost HTTP (tests + local mock), goes through a direct TcpStream.
 //! For HTTPS, spawns curl with piped stdout and pumps its stdout → sink.
 
-use crate::platform::{is_safe_url, resolve_curl};
+use crate::platform::{is_safe_url, resolve_curl, sanitize_curl_env};
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::process::{Command, Stdio};
@@ -82,7 +82,9 @@ fn stream_from_curl<W: Write>(
         ));
     }
     let curl = resolve_curl()?;
-    let mut child = Command::new(curl)
+    let mut cmd = Command::new(curl);
+    sanitize_curl_env(&mut cmd);
+    let mut child = cmd
         .arg("-sS")
         .arg("-i")
         .arg("-L")
@@ -166,14 +168,25 @@ fn pump<R: Read, W: Write>(
     writer: &mut W,
     status: u16,
 ) -> Result<StreamStats, String> {
+    // Security posture: body bytes are forwarded to the writer ONLY on a
+    // 2xx upstream status. On any other status (redirects are followed
+    // earlier by curl; what reaches us is the final status), we drain but
+    // discard the body so the caller can report the actual error without
+    // the client having received a partial success body.
+    let forward = (200..300).contains(&status);
     let mut bytes: u64 = 0;
     if !body.carried.is_empty() {
-        writer
-            .write_all(&body.carried)
-            .map_err(|e| format!("sink write: {e}"))?;
+        if forward {
+            writer
+                .write_all(&body.carried)
+                .map_err(|e| format!("sink write: {e}"))?;
+        }
         bytes += body.carried.len() as u64;
     }
     let mut buf = vec![0u8; STREAM_CHUNK_SIZE];
+    // Total payload cap — bytes cannot exceed MAX_FORWARD_BYTES even if
+    // the upstream Content-Length (or chunked body) claims otherwise.
+    const MAX_FORWARD_BYTES: u64 = 512 * 1024 * 1024;
     loop {
         let n = body
             .inner
@@ -182,12 +195,21 @@ fn pump<R: Read, W: Write>(
         if n == 0 {
             break;
         }
-        writer
-            .write_all(&buf[..n])
-            .map_err(|e| format!("sink write: {e}"))?;
-        bytes += n as u64;
+        bytes = bytes.saturating_add(n as u64);
+        if bytes > MAX_FORWARD_BYTES {
+            return Err(format!(
+                "upstream body exceeded MAX_FORWARD_BYTES ({MAX_FORWARD_BYTES})"
+            ));
+        }
+        if forward {
+            writer
+                .write_all(&buf[..n])
+                .map_err(|e| format!("sink write: {e}"))?;
+        }
     }
-    writer.flush().map_err(|e| format!("sink flush: {e}"))?;
+    if forward {
+        writer.flush().map_err(|e| format!("sink flush: {e}"))?;
+    }
     Ok(StreamStats {
         bytes,
         upstream_status: status,

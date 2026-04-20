@@ -33,6 +33,11 @@ const MAX_CONCURRENT: usize = 32;
 const METADATA_TIMEOUT_SECS: u32 = 15;
 const TARBALL_TIMEOUT_SECS: u32 = 60;
 const MAX_TARBALL_BYTES: usize = 200 * 1024 * 1024;
+/// Whole-connection deadline. A single proxied request — including
+/// upstream fetch plus analysis — never legitimately exceeds this.
+/// Bounded here to defeat slow-loris clients that dribble bytes to
+/// hold all MAX_CONCURRENT permits.
+const CONNECTION_DEADLINE_SECS: u64 = 90;
 
 pub struct ProxyContext {
     pub orch: TierOrchestrator,
@@ -132,7 +137,12 @@ fn handle_connection(
     ctx: &ProxyContext,
     _stop: &AtomicBool,
 ) -> std::io::Result<()> {
+    // Per-read timeout (30s): caps any single syscall stall.
+    // Whole-connection deadline (90s via CONNECTION_DEADLINE_SECS):
+    // enforced as a write timeout and via the bounded reads in
+    // http_server::read_request. Together they defeat slow-loris.
     stream.set_read_timeout(Some(Duration::from_secs(30)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(CONNECTION_DEADLINE_SECS)))?;
     let req = match read_request(&stream) {
         Ok(r) => r,
         Err(e) => {
@@ -167,10 +177,10 @@ fn handle_connection(
                         .header("Content-Type", "text/plain");
                 resp.write_to(&mut stream)
             }
-            Some(p) if p.tarball.is_none() => {
-                serve_npm_metadata(&mut stream, ctx, &p.package, accept.as_deref())
-            }
-            Some(p) => serve_npm_tarball(&mut stream, ctx, &p.package, &p.tarball.unwrap()),
+            Some(p) => match p.tarball {
+                None => serve_npm_metadata(&mut stream, ctx, &p.package, accept.as_deref()),
+                Some(tb) => serve_npm_tarball(&mut stream, ctx, &p.package, &tb),
+            },
         };
     }
     if req.path.starts_with("/pip/") {
@@ -270,6 +280,15 @@ fn serve_npm_tarball(
     package: &str,
     tarball_filename: &str,
 ) -> std::io::Result<()> {
+    // Defense in depth. parse_npm_path already applies the valid-name
+    // regex to the package segment, but the tarball-filename segment
+    // was taken verbatim after `/-/`. Reject anything that could
+    // compose an unexpected upstream URL.
+    if !is_safe_tarball_filename(tarball_filename) {
+        let resp = HttpResponse::new(400, "Bad Request", b"invalid tarball filename\n".to_vec())
+            .header("Content-Type", "text/plain");
+        return resp.write_to(stream);
+    }
     let version = version_from_tarball(package, tarball_filename);
     let upstream_url = format!(
         "{}{}/-/{}",
@@ -297,9 +316,20 @@ fn serve_npm_tarball(
         return stream_tarball_forward(stream, &upstream_url);
     }
 
-    let mut buffered = Vec::new();
-    let stats = match stream_forward(&upstream_url, &mut buffered, TARBALL_TIMEOUT_SECS) {
-        Ok(s) => s,
+    // Bounded sink: refuses further writes above MAX_TARBALL_BYTES so the
+    // check is enforced DURING streaming, not after a full upstream flood.
+    let mut buffered = BoundedBuffer::new(MAX_TARBALL_BYTES);
+    match stream_forward(&upstream_url, &mut buffered, TARBALL_TIMEOUT_SECS) {
+        Ok(_) => {}
+        Err(e) if e.contains("tarball exceeds") => {
+            let resp = HttpResponse::new(
+                413,
+                "Payload Too Large",
+                format!("tarball exceeds {MAX_TARBALL_BYTES} byte cap\n").into_bytes(),
+            )
+            .header("Content-Type", "text/plain");
+            return resp.write_to(stream);
+        }
         Err(e) => {
             let resp = HttpResponse::new(
                 502,
@@ -310,16 +340,7 @@ fn serve_npm_tarball(
             return resp.write_to(stream);
         }
     };
-    if buffered.len() > MAX_TARBALL_BYTES {
-        let resp = HttpResponse::new(
-            413,
-            "Payload Too Large",
-            b"tarball exceeds 200MB safety cap\n".to_vec(),
-        )
-        .header("Content-Type", "text/plain");
-        return resp.write_to(stream);
-    }
-    let _ = stats;
+    let buffered = buffered.into_inner();
 
     let analysis = analyze_tarball_bytes(&buffered, package, version.as_deref(), ctx);
     match analysis {
@@ -355,23 +376,29 @@ fn analyze_tarball_bytes(
     let Some(version) = version else {
         return AnalysisOutcome::Allow;
     };
+    // Fail CLOSED on any parse / decompress / extraction error. A package
+    // we put on the watch-list (needs_analysis is only reached if Tier 0
+    // already scored in the suspicion band) that then refuses to decompress
+    // cleanly is adversarial, not a legitimate build artifact.
     let decoded = match crate::compress::gzip::gunzip(bytes) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("[vetpkg] gunzip failed for {package}@{version}: {e}");
-            return AnalysisOutcome::Allow;
+            eprintln!("[vetpkg] BLOCK {package}@{version}: gunzip failed: {e}");
+            return AnalysisOutcome::Block(format!("malformed gzip: {e}"));
         }
     };
     let td = match crate::platform::TempDir::new("vetpkg-analysis") {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("[vetpkg] tempdir create failed: {e}");
+            // Infra error: fail open so a bad disk never becomes a full
+            // outage. Log loudly so operators notice.
+            eprintln!("[vetpkg] WARN tempdir create failed for {package}@{version}: {e}");
             return AnalysisOutcome::Allow;
         }
     };
     if let Err(e) = crate::archive::tar::extract_tar(&decoded, td.path()) {
-        eprintln!("[vetpkg] tar extract failed for {package}@{version}: {e}");
-        return AnalysisOutcome::Allow;
+        eprintln!("[vetpkg] BLOCK {package}@{version}: tar extract failed: {e}");
+        return AnalysisOutcome::Block(format!("malformed tar: {e}"));
     }
 
     let result = match ctx.orch.score_tarball(
@@ -384,8 +411,8 @@ fn analyze_tarball_bytes(
     ) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[vetpkg] tier analysis failed for {package}@{version}: {e}");
-            return AnalysisOutcome::Allow;
+            eprintln!("[vetpkg] BLOCK {package}@{version}: tier analysis failed: {e}");
+            return AnalysisOutcome::Block(format!("analysis failed: {e}"));
         }
     };
     eprintln!("{}", ctx.orch.log_line(package, version, &result));
@@ -399,26 +426,143 @@ fn analyze_tarball_bytes(
     }
 }
 
-fn stream_tarball_forward(stream: &mut TcpStream, url: &str) -> std::io::Result<()> {
-    write!(stream, "HTTP/1.1 200 OK\r\n")?;
-    write!(stream, "Content-Type: application/octet-stream\r\n")?;
-    write!(stream, "Transfer-Encoding: chunked\r\n")?;
-    write!(stream, "Connection: close\r\n\r\n")?;
-    let mut writer = ChunkedWriter { stream };
-    if let Err(e) = stream_forward(url, &mut writer, TARBALL_TIMEOUT_SECS) {
-        eprintln!("[vetpkg] tarball stream failed for {url}: {e}");
+/// Reject tarball filename segments that could compose an unexpected
+/// upstream URL or escape the registry's `/-/` namespace.
+/// npm tarballs always match `<basename>-<version>.tgz` over a whitelist
+/// charset; anything with path separators, `..`, `?`, `#`, `%`, or bytes
+/// outside the URL-safe ASCII set is refused.
+fn is_safe_tarball_filename(s: &str) -> bool {
+    if s.is_empty() || s.len() > 256 {
+        return false;
     }
-    writer.end()
+    if s == "." || s == ".." {
+        return false;
+    }
+    for b in s.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'-' | b'_' | b'+' => {}
+            _ => return false,
+        }
+    }
+    // "..*.tgz" would satisfy the charset above but traverse the path —
+    // reject any run of leading dots.
+    if s.starts_with('.') {
+        return false;
+    }
+    true
 }
 
-struct ChunkedWriter<'a> {
+fn stream_tarball_forward(stream: &mut TcpStream, url: &str) -> std::io::Result<()> {
+    // Deferred-header strategy: start with a probe writer that captures
+    // the first forwarded byte. On first write we emit HTTP/1.1 200 +
+    // chunked headers. `stream_forward`'s pump only forwards on 2xx
+    // upstream status, so if the upstream returns 4xx/5xx the probe
+    // writer never fires, headers are never committed, and we can send
+    // a 502 with the accurate status.
+    let mut writer = DeferredChunkedWriter {
+        stream,
+        headers_sent: false,
+    };
+    match stream_forward(url, &mut writer, TARBALL_TIMEOUT_SECS) {
+        Ok(stats) if (200..300).contains(&stats.upstream_status) => {
+            if !writer.headers_sent {
+                // Upstream 2xx but empty body — still emit an empty 200.
+                write!(writer.stream, "HTTP/1.1 200 OK\r\n")?;
+                write!(writer.stream, "Content-Type: application/octet-stream\r\n")?;
+                write!(writer.stream, "Transfer-Encoding: chunked\r\n")?;
+                write!(writer.stream, "Connection: close\r\n\r\n")?;
+                writer.headers_sent = true;
+            }
+            writer.end()
+        }
+        Ok(stats) => {
+            if writer.headers_sent {
+                // Body-forward started, then upstream errored mid-stream
+                // (impossible under current pump logic but defensive).
+                eprintln!(
+                    "[vetpkg] upstream changed status mid-stream ({})",
+                    stats.upstream_status
+                );
+                writer.end()
+            } else {
+                let resp = HttpResponse::new(
+                    502,
+                    "Bad Gateway",
+                    format!("upstream returned {}\n", stats.upstream_status).into_bytes(),
+                )
+                .header("Content-Type", "text/plain");
+                resp.write_to(writer.stream)
+            }
+        }
+        Err(e) => {
+            eprintln!("[vetpkg] tarball stream failed for {url}: {e}");
+            if writer.headers_sent {
+                writer.end()
+            } else {
+                let resp = HttpResponse::new(
+                    502,
+                    "Bad Gateway",
+                    format!("upstream fetch failed: {e}\n").into_bytes(),
+                )
+                .header("Content-Type", "text/plain");
+                resp.write_to(writer.stream)
+            }
+        }
+    }
+}
+
+/// Write sink that rejects writes past a fixed byte cap. Returns an
+/// `io::Error` with a `tarball exceeds` sentinel that `stream_tarball_forward`
+/// recognises in its error branch to emit a 413 instead of a 502.
+struct BoundedBuffer {
+    buf: Vec<u8>,
+    cap: usize,
+}
+
+impl BoundedBuffer {
+    fn new(cap: usize) -> Self {
+        Self {
+            buf: Vec::new(),
+            cap,
+        }
+    }
+    fn into_inner(self) -> Vec<u8> {
+        self.buf
+    }
+}
+
+impl Write for BoundedBuffer {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        if self.buf.len().saturating_add(data.len()) > self.cap {
+            return Err(std::io::Error::other(format!(
+                "tarball exceeds {} byte cap",
+                self.cap
+            )));
+        }
+        self.buf.extend_from_slice(data);
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+struct DeferredChunkedWriter<'a> {
     stream: &'a mut TcpStream,
+    headers_sent: bool,
 }
 
-impl<'a> Write for ChunkedWriter<'a> {
+impl<'a> Write for DeferredChunkedWriter<'a> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
+        }
+        if !self.headers_sent {
+            write!(self.stream, "HTTP/1.1 200 OK\r\n")?;
+            write!(self.stream, "Content-Type: application/octet-stream\r\n")?;
+            write!(self.stream, "Transfer-Encoding: chunked\r\n")?;
+            write!(self.stream, "Connection: close\r\n\r\n")?;
+            self.headers_sent = true;
         }
         write!(self.stream, "{:x}\r\n", buf.len())?;
         self.stream.write_all(buf)?;
@@ -430,7 +574,7 @@ impl<'a> Write for ChunkedWriter<'a> {
     }
 }
 
-impl<'a> ChunkedWriter<'a> {
+impl<'a> DeferredChunkedWriter<'a> {
     fn end(&mut self) -> std::io::Result<()> {
         write!(self.stream, "0\r\n\r\n")
     }
@@ -537,6 +681,28 @@ mod tests {
         stop.store(true, Ordering::Relaxed);
         let _ = TcpStream::connect(("127.0.0.1", port));
         let _ = handle.join();
+    }
+
+    #[test]
+    fn tarball_filename_safety_gate() {
+        assert!(is_safe_tarball_filename("express-4.18.2.tgz"));
+        assert!(is_safe_tarball_filename("sharp-0.32.6.tgz"));
+        assert!(!is_safe_tarball_filename(""));
+        assert!(!is_safe_tarball_filename(".."));
+        assert!(!is_safe_tarball_filename("..%2fevil"));
+        assert!(!is_safe_tarball_filename("x/y.tgz"));
+        assert!(!is_safe_tarball_filename("x?y.tgz"));
+        assert!(!is_safe_tarball_filename(".hidden.tgz"));
+        assert!(!is_safe_tarball_filename(&"a".repeat(300)));
+    }
+
+    #[test]
+    fn bounded_buffer_refuses_write_past_cap() {
+        use std::io::Write;
+        let mut b = BoundedBuffer::new(8);
+        assert!(b.write_all(b"hello").is_ok());
+        let err = b.write_all(b"world!").unwrap_err();
+        assert!(err.to_string().contains("tarball exceeds"));
     }
 
     #[test]

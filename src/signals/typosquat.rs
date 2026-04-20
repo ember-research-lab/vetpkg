@@ -220,6 +220,13 @@ fn edit_distance(a: &str, b: &str) -> usize {
 }
 
 fn damerau_levenshtein(a: &str, b: &str) -> usize {
+    // npm limits package names to 214 chars; PyPI to 214; crates.io to 64.
+    // A 256-char cap defeats corpus-poisoning attempts that push 10 000-
+    // char strings through the O(m·n) matrix allocation.
+    const MAX_NAME_CHARS: usize = 256;
+    if a.len() > MAX_NAME_CHARS || b.len() > MAX_NAME_CHARS {
+        return a.len().abs_diff(b.len()).max(1);
+    }
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     let (m, n) = (a.len(), b.len());

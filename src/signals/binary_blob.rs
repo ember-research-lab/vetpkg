@@ -226,6 +226,16 @@ where
 }
 
 fn hash_and_entropy(path: &Path) -> std::io::Result<(String, f64)> {
+    // Cap file size so a 4 GB file in a hostile tarball can't OOM the
+    // scanner. The entropy/hash pair is advisory; above this threshold
+    // the file is classified as a blob regardless.
+    const MAX_HASHABLE_BYTES: u64 = 64 * 1024 * 1024;
+    let meta = fs::metadata(path)?;
+    if meta.len() > MAX_HASHABLE_BYTES {
+        return Err(std::io::Error::other(format!(
+            "file exceeds {MAX_HASHABLE_BYTES} byte blob-hash cap"
+        )));
+    }
     let data = fs::read(path)?;
     let hash = sha256_hex(&data);
     let _ = Sha256::new();

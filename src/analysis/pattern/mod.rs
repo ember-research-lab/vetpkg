@@ -126,7 +126,9 @@ struct ParsedList {
 }
 
 fn parse_list(text: &str, allow_replace: bool) -> ParsedList {
+    use std::collections::HashSet;
     let mut patterns = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     let mut replace = false;
     for raw in text.lines() {
         let trimmed = raw.trim();
@@ -139,7 +141,9 @@ fn parse_list(text: &str, allow_replace: bool) -> ParsedList {
             }
             continue;
         }
-        if !patterns.contains(&trimmed.to_string()) {
+        // O(1) dedup: a user pattern file with thousands of duplicate
+        // lines would otherwise drive an O(N²) `Vec::contains` scan.
+        if seen.insert(trimmed.to_string()) {
             patterns.push(trimmed.to_string());
         }
     }

@@ -135,6 +135,13 @@ pub fn scan_dir(
         if !metadata.is_file() {
             return Ok(());
         }
+        // Cap build-file size. A legitimate Makefile/CMakeLists.txt is
+        // tens of KB; anything multi-MB is adversarial or generated and
+        // not useful to diff.
+        const MAX_BUILD_FILE_BYTES: u64 = 4 * 1024 * 1024;
+        if metadata.len() > MAX_BUILD_FILE_BYTES {
+            return Ok(());
+        }
         let content = match fs::read_to_string(abs_path) {
             Ok(s) => s,
             Err(_) => return Ok(()),

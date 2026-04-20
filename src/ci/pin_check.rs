@@ -45,6 +45,14 @@ pub fn resolve_tag_sha(
     repo: &str,
     tag: &str,
 ) -> Result<String, String> {
+    // Validate every path component that flows from an attacker-controlled
+    // workflow file into the GitHub REST API URL. Without this, a `uses:`
+    // value of `evil/repo/../../../admin/settings@v1` produces a URL with
+    // literal `..` that curl forwards and GitHub's router walks — potentially
+    // reaching endpoints the audit was never meant to probe.
+    validate_github_component(owner).map_err(|e| format!("bad owner: {e}"))?;
+    validate_github_component(repo).map_err(|e| format!("bad repo: {e}"))?;
+    validate_github_ref(tag).map_err(|e| format!("bad tag: {e}"))?;
     let url = format!(
         "{}/repos/{owner}/{repo}/git/ref/tags/{tag}",
         api_base.trim_end_matches('/')
@@ -62,6 +70,7 @@ pub fn resolve_tag_sha(
         return Ok(sha);
     }
     if ty == "tag" {
+        validate_sha_like(&sha).map_err(|e| format!("bad annotated-tag sha: {e}"))?;
         let tag_url = format!(
             "{}/repos/{owner}/{repo}/git/tags/{sha}",
             api_base.trim_end_matches('/')
@@ -78,6 +87,65 @@ pub fn resolve_tag_sha(
         ));
     }
     Err(format!("unexpected ref object type {ty:?} for {url}"))
+}
+
+/// GitHub owner/repo names: [a-zA-Z0-9._-]{1,100}. No leading dot or dash.
+/// Strictly reject anything else before it reaches a URL path component.
+fn validate_github_component(s: &str) -> Result<(), String> {
+    if s.is_empty() || s.len() > 100 {
+        return Err("length out of range".into());
+    }
+    if s.starts_with('.') || s.starts_with('-') {
+        return Err("must not start with '.' or '-'".into());
+    }
+    for b in s.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'-' | b'_' => {}
+            _ => return Err(format!("forbidden byte 0x{b:02x}")),
+        }
+    }
+    if s == "." || s == ".." {
+        return Err("forbidden component".into());
+    }
+    Ok(())
+}
+
+/// Git ref names as accepted by GitHub (subset of git-check-ref-format).
+/// We allow tag-shaped strings plus SHAs (which may appear via `uses:`).
+fn validate_github_ref(s: &str) -> Result<(), String> {
+    if s.is_empty() || s.len() > 250 {
+        return Err("length out of range".into());
+    }
+    // git forbids these explicitly; we inherit + also block URL-meta chars
+    // that would let the ref escape the path segment.
+    for b in s.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'-' | b'_' | b'/' | b'+' => {}
+            _ => return Err(format!("forbidden byte 0x{b:02x}")),
+        }
+    }
+    if s.contains("..") || s.starts_with('/') || s.starts_with('.') || s.ends_with('.') {
+        return Err("contains invalid sequence".into());
+    }
+    Ok(())
+}
+
+/// Validate a value coming back from the GitHub API before embedding it
+/// in a second API URL. Real SHAs are 40-char lowercase hex, but we
+/// accept the broader alphanumeric+underscore/hyphen set to remain
+/// robust across mock fixtures. What matters for security is that no
+/// path-traversal or URL-meta bytes slip through.
+fn validate_sha_like(s: &str) -> Result<(), String> {
+    if s.is_empty() || s.len() > 64 {
+        return Err("length out of range".into());
+    }
+    for b in s.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-' => {}
+            _ => return Err(format!("forbidden byte 0x{b:02x}")),
+        }
+    }
+    Ok(())
 }
 
 fn extract_object(v: &crate::json::JsonValue) -> Option<(String, String)> {
@@ -131,6 +199,34 @@ mod tests {
             Some(("owner".into(), "repo".into()))
         );
         assert!(split_owner_repo("just-owner").is_none());
+    }
+
+    #[test]
+    fn owner_repo_tag_validation_blocks_traversal() {
+        assert!(validate_github_component("actions").is_ok());
+        assert!(validate_github_component("tj-actions").is_ok());
+        assert!(validate_github_component("..").is_err());
+        assert!(validate_github_component(".hidden").is_err());
+        assert!(validate_github_component("-x").is_err());
+        assert!(validate_github_component("a/b").is_err());
+        assert!(validate_github_component("a?b").is_err());
+
+        assert!(validate_github_ref("v4").is_ok());
+        assert!(validate_github_ref("v1.2.3").is_ok());
+        assert!(validate_github_ref("release/v1").is_ok());
+        assert!(validate_github_ref("../../admin").is_err());
+        assert!(validate_github_ref("v1?query").is_err());
+        assert!(validate_github_ref(".hidden").is_err());
+    }
+
+    #[test]
+    fn resolve_tag_sha_rejects_traversal_input() {
+        // owner containing a slash never even reaches fetch_json.
+        let err = resolve_tag_sha("https://api.github.com", "evil/a", "repo", "v1").unwrap_err();
+        assert!(err.contains("bad owner"));
+        let err =
+            resolve_tag_sha("https://api.github.com", "owner", "repo", "../evil").unwrap_err();
+        assert!(err.contains("bad tag"));
     }
 
     #[test]

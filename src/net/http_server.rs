@@ -1,6 +1,13 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 
+/// Hard caps on inbound HTTP parsing. These protect against clients that
+/// try to exhaust memory with pathological request shapes.
+pub const MAX_REQUEST_LINE_BYTES: usize = 8 * 1024;
+pub const MAX_HEADER_BYTES: usize = 8 * 1024;
+pub const MAX_HEADERS: usize = 100;
+pub const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct HttpRequest {
     pub method: String,
@@ -22,8 +29,7 @@ impl HttpRequest {
 
 pub fn read_request<R: Read>(stream: R) -> io::Result<HttpRequest> {
     let mut rdr = BufReader::new(stream);
-    let mut line = String::new();
-    rdr.read_line(&mut line)?;
+    let line = read_bounded_line(&mut rdr, MAX_REQUEST_LINE_BYTES)?;
     if line.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
@@ -50,19 +56,39 @@ pub fn read_request<R: Read>(stream: R) -> io::Result<HttpRequest> {
 
     let mut headers = Vec::new();
     loop {
-        let mut h = String::new();
-        let n = rdr.read_line(&mut h)?;
-        if n == 0 {
-            break;
+        if headers.len() >= MAX_HEADERS {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "too many headers",
+            ));
         }
-        let h = h.trim_end_matches(['\r', '\n']).to_string();
+        let h = read_bounded_line(&mut rdr, MAX_HEADER_BYTES)?;
         if h.is_empty() {
             break;
         }
+        let h = h.trim_end_matches(['\r', '\n']);
+        if h.is_empty() {
+            break;
+        }
+        // Reject header names containing ASCII control chars to defeat
+        // request-smuggling / response-splitting tricks an upstream proxy
+        // might probe against us.
         if let Some(colon) = h.find(':') {
-            let name = h[..colon].trim().to_string();
-            let value = h[colon + 1..].trim().to_string();
-            headers.push((name, value));
+            let name = h[..colon].trim();
+            let value = h[colon + 1..].trim();
+            if name.bytes().any(|b| b < 0x20 || b == 0x7F) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "bad header name",
+                ));
+            }
+            if value.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "bad header value",
+                ));
+            }
+            headers.push((name.to_string(), value.to_string()));
         }
     }
 
@@ -71,6 +97,16 @@ pub fn read_request<R: Read>(stream: R) -> io::Result<HttpRequest> {
         .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
         .and_then(|(_, v)| v.parse().ok())
         .unwrap_or(0);
+
+    if content_length > MAX_BODY_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Content-Length {} exceeds {}",
+                content_length, MAX_BODY_BYTES
+            ),
+        ));
+    }
 
     let mut body = vec![0u8; content_length];
     if content_length > 0 {
@@ -84,6 +120,38 @@ pub fn read_request<R: Read>(stream: R) -> io::Result<HttpRequest> {
         headers,
         body,
     })
+}
+
+/// Read one \n-terminated line but refuse anything longer than `cap`.
+/// Returns an empty string on EOF.
+fn read_bounded_line<R: BufRead>(rdr: &mut R, cap: usize) -> io::Result<String> {
+    let mut buf = Vec::with_capacity(256.min(cap));
+    loop {
+        let available = match rdr.fill_buf() {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        if available.is_empty() {
+            break;
+        }
+        let (consumed, done) = match available.iter().position(|&b| b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (available.len(), false),
+        };
+        if buf.len() + consumed > cap {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("HTTP line exceeds {cap} bytes"),
+            ));
+        }
+        buf.extend_from_slice(&available[..consumed]);
+        rdr.consume(consumed);
+        if done {
+            break;
+        }
+    }
+    String::from_utf8(buf).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "non-utf8 line"))
 }
 
 pub struct HttpResponse {
@@ -220,5 +288,44 @@ mod tests {
     fn bad_request_errors() {
         let req = b"BAD\r\n";
         assert!(read_request(&req[..]).is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_content_length() {
+        let req = format!(
+            "POST /x HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            MAX_BODY_BYTES + 1
+        );
+        let err = read_request(req.as_bytes()).unwrap_err();
+        assert!(err.to_string().contains("exceeds"));
+    }
+
+    #[test]
+    fn rejects_too_many_headers() {
+        let mut buf = String::from("GET / HTTP/1.1\r\n");
+        for i in 0..MAX_HEADERS + 5 {
+            buf.push_str(&format!("X-H{i}: v\r\n"));
+        }
+        buf.push_str("\r\n");
+        let err = read_request(buf.as_bytes()).unwrap_err();
+        assert!(err.to_string().contains("too many headers"));
+    }
+
+    #[test]
+    fn rejects_oversized_request_line() {
+        let mut buf = String::from("GET /");
+        buf.push_str(&"a".repeat(MAX_REQUEST_LINE_BYTES + 100));
+        buf.push_str(" HTTP/1.1\r\n\r\n");
+        let err = read_request(buf.as_bytes()).unwrap_err();
+        assert!(err.to_string().contains("exceeds"));
+    }
+
+    #[test]
+    fn rejects_header_with_crlf_in_value() {
+        // With the hardened parser, a bare CR inside a header value is
+        // rejected outright (defense against response-splitting probes).
+        let req = "GET / HTTP/1.1\r\nX-Bad: one\rtwo\r\n\r\n";
+        let err = read_request(req.as_bytes()).unwrap_err();
+        assert!(err.to_string().contains("bad header"));
     }
 }

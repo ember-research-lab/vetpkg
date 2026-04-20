@@ -29,6 +29,9 @@ pub fn gunzip(data: &[u8]) -> Result<Vec<u8>, String> {
         pos = skip_zero_terminated(data, pos)?;
     }
     if flags & 0x02 != 0 {
+        if pos + 2 > data.len() {
+            return Err("gzip truncated (FHCRC)".into());
+        }
         pos += 2;
     }
     if pos + 8 > data.len() {

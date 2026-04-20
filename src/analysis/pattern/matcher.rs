@@ -17,6 +17,18 @@ use super::{Language, PatternSet};
 
 pub const SAME_SCOPE_WINDOW: usize = 30;
 
+/// Per-line byte cap before line-level scans run. Minified vendored
+/// payloads can have single lines of tens of MB; above the cap we skip
+/// the line entirely. Legitimate source lines are always under a few KB.
+pub const MAX_MATCHER_LINE_BYTES: usize = 64 * 1024;
+
+/// Output caps for the quadratic taint and variable-flow builders.
+/// A malicious file can synthesize many source+sink matches within one
+/// window, producing M×N TaintPath structs (each cloning two line
+/// Strings). These caps bound per-file output to a still-useful sample.
+pub const MAX_TAINT_PATHS: usize = 256;
+pub const MAX_VARIABLE_FLOWS: usize = 256;
+
 #[derive(Debug, Clone)]
 pub struct FileFindings {
     pub file: String,
@@ -59,8 +71,11 @@ pub fn scan_file(
     let sink_matches = scan_pattern_matches(content, &patterns.sinks, MatchKind::Sink);
 
     let mut taint_paths: Vec<TaintPath> = Vec::new();
-    for src in &source_matches {
+    'outer_t: for src in &source_matches {
         for sink in &sink_matches {
+            if taint_paths.len() >= MAX_TAINT_PATHS {
+                break 'outer_t;
+            }
             let distance = src.line_number.abs_diff(sink.line_number);
             if distance <= SAME_SCOPE_WINDOW {
                 taint_paths.push(TaintPath {
@@ -73,10 +88,13 @@ pub fn scan_file(
     }
 
     let mut variable_flows: Vec<VariableFlow> = Vec::new();
-    for src in &source_matches {
+    'outer_v: for src in &source_matches {
         let vars = extract_assignment_targets(&src.line, language);
         for var in vars {
             for sink in &sink_matches {
+                if variable_flows.len() >= MAX_VARIABLE_FLOWS {
+                    break 'outer_v;
+                }
                 if mentions_variable(&sink.line, &var) {
                     variable_flows.push(VariableFlow {
                         source: src.clone(),
@@ -113,6 +131,9 @@ fn scan_pattern_matches(content: &str, patterns: &[String], _kind: MatchKind) ->
     let mut matches = Vec::new();
     let mut in_block_comment = false;
     for (idx, raw_line) in content.lines().enumerate() {
+        if raw_line.len() > MAX_MATCHER_LINE_BYTES {
+            continue;
+        }
         let cleaned = strip_comments(raw_line, &mut in_block_comment);
         if cleaned.trim().is_empty() {
             continue;

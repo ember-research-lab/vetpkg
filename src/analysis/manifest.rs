@@ -73,6 +73,15 @@ pub fn scan(root: &Path, prior: &FileManifest) -> std::io::Result<DiffReport> {
         let Some(language) = Language::from_extension(&ext) else {
             return Ok(());
         };
+        // Hard cap: anything above MAX_SCANNABLE_BYTES is skipped entirely
+        // so a giant file in a hostile tarball can't OOM the scanner.
+        // Legitimate source files are always well below this.
+        const MAX_SCANNABLE_BYTES: u64 = 16 * 1024 * 1024;
+        if let Ok(meta) = fs::metadata(abs_path) {
+            if meta.len() > MAX_SCANNABLE_BYTES {
+                return Ok(());
+            }
+        }
         let Ok(bytes) = fs::read(abs_path) else {
             return Ok(());
         };

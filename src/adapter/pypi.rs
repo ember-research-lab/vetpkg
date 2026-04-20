@@ -218,7 +218,10 @@ pub fn parse_requires_dist_name(spec: &str) -> Option<String> {
     let spec = spec.trim();
     let mut end = spec.len();
     for (i, b) in spec.as_bytes().iter().enumerate() {
-        if b" <>=!~()".contains(&(*b as char).to_string().as_bytes()[0]) {
+        // Direct byte-membership test — the previous `.to_string().as_bytes()`
+        // round-trip allocated a fresh String per byte, making this O(n)
+        // allocations against an attacker-controlled Requires-Dist string.
+        if b" <>=!~()".contains(b) {
             end = i;
             break;
         }

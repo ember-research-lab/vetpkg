@@ -5,7 +5,27 @@ pub enum DiffOp {
     Delete { old_idx: usize },
 }
 
+/// Hard cap on combined line count. Myers is O(ND) in time and — because
+/// we retain every `v` snapshot for backtrack — O((n+m)²) in memory.
+/// Two 20 000-line files with no shared content would try to allocate
+/// ~12 GB of i64 trace. The cap short-circuits to a trivial delete+insert
+/// reconstruction so the caller still gets a valid DiffOp stream.
+pub const MAX_DIFF_LINES: usize = 10_000;
+
 pub fn diff_lines(old: &[&str], new: &[&str]) -> Vec<DiffOp> {
+    if old.len() + new.len() > MAX_DIFF_LINES {
+        // Degenerate path: treat every old line as deleted and every
+        // new line as inserted. Callers only use this as a signal source
+        // for source/sink matching, so fidelity isn't required.
+        let mut ops = Vec::with_capacity(old.len() + new.len());
+        for i in 0..old.len() {
+            ops.push(DiffOp::Delete { old_idx: i });
+        }
+        for j in 0..new.len() {
+            ops.push(DiffOp::Insert { new_idx: j });
+        }
+        return ops;
+    }
     let n = old.len();
     let m = new.len();
     let max = n + m;
