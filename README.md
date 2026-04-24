@@ -2,6 +2,8 @@
 
 A local proxy registry that intercepts package-manager installs (npm, with PyPI and Cargo adapters available) and scores them against supply-chain security signals. Blocks known-bad versions, annotates suspicious ones, streams clean ones through untouched.
 
+Built at [**Ember Research Lab**](https://ember-research-lab.github.io/) — independent research on spectral physics, AI alignment, and engineering.
+
 ## Design principle
 
 **A supply-chain security tool must not itself be a supply-chain risk.**
