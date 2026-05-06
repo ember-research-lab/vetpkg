@@ -308,8 +308,13 @@ fn intel_from_lockfile(name: &str, version: &str) -> PackageIntel {
 pub fn report_as_json(r: &AuditReport) -> String {
     let mut findings = Vec::with_capacity(r.findings.len());
     for f in &r.findings {
+        // Field name: `package` matches the agent-monitor integration
+        // contract (`ember-agent-monitor/src/integrate.rs`); `name` would
+        // silently mismatch. Signal serialization uses the structured
+        // `signal_short_label` rather than `{:?}` Debug, which is unstable
+        // across releases and not valid JSON-friendly output.
         findings.push(JsonValue::Object(vec![
-            ("name".into(), JsonValue::Str(f.name.clone())),
+            ("package".into(), JsonValue::Str(f.name.clone())),
             ("version".into(), JsonValue::Str(f.version.clone())),
             ("score".into(), JsonValue::Number(f.score)),
             (
@@ -321,7 +326,11 @@ pub fn report_as_json(r: &AuditReport) -> String {
                 JsonValue::Array(
                     f.signals
                         .iter()
-                        .map(|s| JsonValue::Str(format!("{:?}", s)))
+                        .map(|s| {
+                            JsonValue::Str(
+                                crate::engine::orchestrator::signal_short_label(s),
+                            )
+                        })
                         .collect(),
                 ),
             ),
