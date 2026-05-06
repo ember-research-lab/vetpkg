@@ -326,11 +326,7 @@ pub fn report_as_json(r: &AuditReport) -> String {
                 JsonValue::Array(
                     f.signals
                         .iter()
-                        .map(|s| {
-                            JsonValue::Str(
-                                crate::engine::orchestrator::signal_short_label(s),
-                            )
-                        })
+                        .map(|s| JsonValue::Str(crate::engine::orchestrator::signal_short_label(s)))
                         .collect(),
                 ),
             ),
