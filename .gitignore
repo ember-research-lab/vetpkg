@@ -6,3 +6,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Local Claude Code state (handoffs, summaries)
+.claude/
