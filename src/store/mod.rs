@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod config;
+pub mod findings_log;
 pub mod lock;
 
 pub use cache::Store;

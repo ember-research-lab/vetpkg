@@ -241,7 +241,7 @@ impl TierOrchestrator {
     }
 }
 
-fn signal_short_label(s: &Signal) -> String {
+pub fn signal_short_label(s: &Signal) -> String {
     match s {
         Signal::AdvisoryCheck { id, severity } => format!("Advisory({id}:{severity:?})"),
         Signal::MaintainerChange { .. } => "MaintainerChange".into(),
