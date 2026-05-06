@@ -147,9 +147,18 @@ mod tests {
         );
         let path = td.path().join(".ember/vetpkg/findings.jsonl");
         let body = std::fs::read_to_string(&path).expect("findings file written");
-        assert!(body.contains("\"package\":\"evil-pkg\""), "package field: {body}");
-        assert!(body.contains("\"severity\":\"high\""), "severity field: {body}");
-        assert!(body.contains("\"ecosystem\":\"npm\""), "ecosystem field: {body}");
+        assert!(
+            body.contains("\"package\":\"evil-pkg\""),
+            "package field: {body}"
+        );
+        assert!(
+            body.contains("\"severity\":\"high\""),
+            "severity field: {body}"
+        );
+        assert!(
+            body.contains("\"ecosystem\":\"npm\""),
+            "ecosystem field: {body}"
+        );
         assert!(body.contains("Typo(express:0.900)"), "signal label: {body}");
         if let Some(p) = prev {
             std::env::set_var("HOME", p);
