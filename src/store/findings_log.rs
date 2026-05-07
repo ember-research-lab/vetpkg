@@ -146,7 +146,7 @@ mod tests {
             }],
         );
         let path = td.path().join(".ember/vetpkg/findings.jsonl");
-        let body = std::fs::read_to_string(&path).expect("findings file written");
+        let body = std::fs::read_to_string(path).expect("findings file written");
         assert!(
             body.contains("\"package\":\"evil-pkg\""),
             "package field: {body}"
