@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- New `PublishAnomalyKind::DormantMaintainer` signal. Catches the
+  hijack-of-popular-package shape: maintainer set unchanged +
+  previous publish > 12 months ago + ≥1 prior version in
+  publish_history. Weight 0.30 (higher than other publish
+  anomalies because dormant-account compromise is high-confidence).
+  Closes the gap originally pinned by the
+  `is_package_jul2025` threat-intel fixture; that fixture's
+  verdict moves Warn → Block as a result.
+
 ## [0.3.0] — 2026-04-20
 
 Initial public release. Includes the security hardening pass

@@ -5,6 +5,13 @@
   "maintainers": ["compromised-dormant-maintainer"],
   "prior_maintainers": ["compromised-dormant-maintainer"],
   "publish_time": 1721347200,
+  "publish_history": [
+    ["1.0.0", 1493078400],
+    ["2.0.0", 1495670400],
+    ["3.0.0", 1498348800],
+    ["3.3.0", 1500076800],
+    ["5.0.0", 1721347200]
+  ],
   "dependencies": ["axios", "form-data"],
   "prior_dependencies": [],
   "install_hooks": [

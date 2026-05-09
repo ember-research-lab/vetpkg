@@ -520,6 +520,7 @@ fn parse_intel(text: &str) -> Result<PackageIntel, String> {
 
     let install_hooks = parse_install_hooks(text);
     let advisories = parse_advisories(text);
+    let publish_history = parse_publish_history(text);
 
     Ok(PackageIntel {
         ecosystem,
@@ -528,7 +529,7 @@ fn parse_intel(text: &str) -> Result<PackageIntel, String> {
         maintainers,
         prior_maintainers,
         publish_time,
-        publish_history: Vec::new(),
+        publish_history,
         dependencies,
         prior_dependencies,
         install_hooks,
@@ -538,6 +539,65 @@ fn parse_intel(text: &str) -> Result<PackageIntel, String> {
         dep_ages: std::collections::HashMap::new(),
         popularity_rank,
     })
+}
+
+/// Parse publish_history: list of [version, unix_seconds] pairs.
+/// Format: `"publish_history": [["1.0.0", 1500000000], ["2.0.0", 1700000000]]`
+fn parse_publish_history(text: &str) -> Vec<(String, u64)> {
+    let mut out = Vec::new();
+    let arr = match extract_array(text, "publish_history") {
+        Some(a) => a,
+        None => return out,
+    };
+    // Each entry is a 2-element array: [string, number].
+    let mut depth = 0usize;
+    let mut start = None;
+    for (i, ch) in arr.char_indices() {
+        match ch {
+            '[' => {
+                if depth == 0 {
+                    start = Some(i);
+                }
+                depth += 1;
+            }
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    if let Some(begin) = start {
+                        let inner = &arr[begin + 1..i];
+                        if let Some((v, t)) = parse_history_pair(inner) {
+                            out.push((v, t));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn parse_history_pair(inner: &str) -> Option<(String, u64)> {
+    // Find the first quoted string (version).
+    let q1 = inner.find('"')?;
+    let q2_rel = inner[q1 + 1..].find('"')?;
+    let version = inner[q1 + 1..q1 + 1 + q2_rel].to_string();
+    // Find the first decimal number after the second quote.
+    let after = &inner[q1 + 1 + q2_rel + 1..];
+    let trimmed = after.trim_start_matches([',', ' ', '\t']);
+    let mut end = 0;
+    for c in trimmed.chars() {
+        if c.is_ascii_digit() {
+            end += c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if end == 0 {
+        return None;
+    }
+    let timestamp: u64 = trimmed[..end].parse().ok()?;
+    Some((version, timestamp))
 }
 
 fn parse_install_hooks(text: &str) -> Vec<InstallHook> {
