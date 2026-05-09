@@ -1,0 +1,12 @@
+{
+  "fixture": "is_package_jul2025",
+  "_note": "Jul 19 2025: the popular `is` npm package was hijacked via old-maintainer-account compromise. Malicious versions 3.3.1 and 5.0.0 were published. The differentiating signal vs. fresh-publisher attacks: same maintainer account, but long-dormant. vetpkg's current MaintainerChange signal does NOT catch this shape (it only catches *new* maintainers, not dormant-then-active accounts). Two signals do fire — HookCheck (the postinstall command exfiltrating hostname) and FreshPackage (publish_time 0.5h ago) — landing the package at Warn, not Block. This is an honest gap pin: the fixture documents that today's vetpkg WARNS but doesn't BLOCK the canonical hijack-of-popular-package shape, and adding a DormantMaintainer signal is tracked for v1.5 hardening.\n\nSources: Avertium / CrowdStrike Jul 18-19 2025; Socket. Corpus extension §2.1.",
+  "expected_findings": [
+    {
+      "package": "is",
+      "version": "5.0.0",
+      "verdict": "Warn",
+      "signals_contain": ["Hook(postinstall", "Fresh("]
+    }
+  ]
+}

@@ -25,6 +25,28 @@ Versions track `Cargo.toml`'s `version`.
   hosts is a v1.5 hardening item; fixture pins current behaviour
   so the change is detectable when it lands. Fixture:
   `phantomraven_rdd_aug2025/`.
+- **s1ngularity Nx malicious versions** (Snyk + StepSecurity + Wiz +
+  Socket, Aug 27 2025): first documented AI-CLI weaponization in npm
+  supply chain. Six tier0 signals fire, verdict Block. Fixture:
+  `s1ngularity_nx_aug2025/` (intel-driven). Corpus extension §2.1 +
+  §3.6 (CLI-flag coercion).
+- **is package hijack** (Avertium / CrowdStrike Jul 19 2025):
+  account-compromise hijack of a popular package. Two signals fire
+  (Hook + Fresh) → Warn. Documents an honest gap: vetpkg's
+  MaintainerChange signal catches new maintainers but not dormant-
+  account-suddenly-active. New `DormantMaintainer` signal tracked for
+  v1.5 hardening. Fixture: `is_package_jul2025/` (intel-driven).
+
+### Runner extensions
+- Threat-intel runner now supports **two fixture shapes**:
+  · lockfile-driven (`lockfile.json` → `audit()`)
+  · intel-driven (`intel.json` → `score_tier0()`)
+  A fixture provides exactly one of the two. Intel-driven covers
+  the signal paths that need fields beyond a lockfile entry:
+  HookCheck, PublishAnomaly, MaintainerChange, AdvisoryCheck,
+  FreshPackage, NewDependency, PopularityAnomaly. Tarball-driven
+  (BinaryBlobDetection, BuildScriptDiff, TaintDetection) is a future
+  follow-up.
 
 ### Integration
 - `~/.ember/vetpkg/findings.jsonl` now produced on Warn/Block verdicts

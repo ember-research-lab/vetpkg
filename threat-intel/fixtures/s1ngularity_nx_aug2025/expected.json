@@ -1,0 +1,12 @@
+{
+  "fixture": "s1ngularity_nx_aug2025",
+  "_note": "Aug 26-27 2025: 8 malicious nx versions (20.9.0-20.12.0, 21.5.0-21.8.0) live on npm for ~5h 20m. The novel TTP is **AI-CLI weaponization**: the postinstall hook invokes Claude Code / Gemini CLI / Amazon Q with `--dangerously-skip-permissions` (or equivalents) to recursively enumerate $HOME, $HOME/.ssh, $HOME/.ethereum, $HOME/.config, $HOME/Library/Application Support, /etc, /var, /tmp for wallets, SSH keys, and .env files; results land in /tmp/inventory.txt and exfil to attacker-created GitHub repos in the victim's own account (`s1ngularity-repository-N`). Destructive secondary: appended `sudo shutdown -h 0` to the user's shell rcfiles.\n\nThis fixture exercises the intel-driven path. Six signals fire on score_tier0:\n  - AdvisoryCheck (GHSA-cxm3-wv7p-598c, Critical)\n  - MaintainerChange (publisher pivoted away from established nrwl maintainers)\n  - HookCheck (postinstall command containing `curl`)\n  - NewDependency x2 (axios, tar — fresh dependencies in a patch bump)\n  - FreshPackage (publish_time 1.5h ago)\n\nVerdict: Block. The advisory hit alone would Block; each additional layer adds redundancy and gives the operator a multi-axis explanation for the action.\n\nSources: Snyk Aug 27 2025; StepSecurity; Wiz; Socket. Corpus extension §2.1 + §3.6 (CLI-flag coercion).",
+  "expected_findings": [
+    {
+      "package": "nx",
+      "version": "20.9.0",
+      "verdict": "Block",
+      "signals_contain": ["Advisory(GHSA-cxm3-wv7p-598c", "Hook(postinstall", "MaintainerChange", "Fresh("]
+    }
+  ]
+}

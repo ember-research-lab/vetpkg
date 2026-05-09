@@ -1,22 +1,32 @@
 //! Threat-intel fixture regression test for vetpkg.
 //!
-//! Each fixture under `threat-intel/fixtures/<name>/` provides a
-//! synthetic lockfile.json + expected.json (and a README.md citing
-//! the source). The runner feeds the lockfile through the standard
-//! `audit()` path and asserts:
+//! Two fixture shapes supported:
 //!
-//! - Every `expected_findings[i]` package + version exists in the
-//!   report with the expected verdict.
-//! - The signals on that finding contain the expected short labels
-//!   (substring match against `signal_short_label`).
-//! - Every `expected_clean[i]` package resolves to `Verdict::Allow`.
+//! 1. **Lockfile-driven** (`lockfile.json` + `expected.json`):
+//!    feeds the lockfile through `audit()`, asserts pinned package-
+//!    level verdicts and signal labels. Catches RDD, typosquats,
+//!    and any signal the lockfile-only audit path produces.
+//!
+//! 2. **Intel-driven** (`intel.json` + `expected.json`):
+//!    constructs a `PackageIntel` directly and runs `score_tier0()`,
+//!    asserting the expected signals + verdict. Covers signals that
+//!    require fields beyond a lockfile entry: HookCheck (postinstall
+//!    scripts), PublishAnomaly (publish-time / IP / region drift),
+//!    MaintainerChange (dormancy → activity), AdvisoryCheck (custom
+//!    OSV match), FreshPackage, PopularityAnomaly.
+//!
+//! A fixture provides exactly one of `lockfile.json` or `intel.json`.
+//! Both forms share the same `expected.json` schema for the parts
+//! they have in common (`expected_findings`, `expected_clean`).
 //!
 //! Adding a fixture is a directory drop — no code change required.
 
 use std::path::PathBuf;
 use vetpkg::cli::audit::{audit, AuditOptions};
-use vetpkg::engine::orchestrator::signal_short_label;
-use vetpkg::types::Verdict;
+use vetpkg::engine::orchestrator::{signal_short_label, TierOrchestrator};
+use vetpkg::types::{
+    Advisory, Ecosystem, InstallHook, PackageIntel, Severity as IntelSeverity, Verdict,
+};
 
 #[test]
 fn all_threat_intel_fixtures_match_expected() {
@@ -55,12 +65,24 @@ fn all_threat_intel_fixtures_match_expected() {
 
 fn run_fixture(dir: &std::path::Path) -> Result<(), String> {
     let lockfile = dir.join("lockfile.json");
+    let intel_path = dir.join("intel.json");
     let expected_path = dir.join("expected.json");
-    if !lockfile.exists() {
-        return Err(format!("missing lockfile.json in {}", dir.display()));
-    }
     if !expected_path.exists() {
         return Err(format!("missing expected.json in {}", dir.display()));
+    }
+
+    let expected_text = std::fs::read_to_string(&expected_path)
+        .map_err(|e| format!("read expected.json: {e}"))?;
+    let expected = parse_expected(&expected_text)?;
+
+    if intel_path.exists() {
+        return run_intel_fixture(&intel_path, &expected);
+    }
+    if !lockfile.exists() {
+        return Err(format!(
+            "fixture {} has neither lockfile.json nor intel.json",
+            dir.display()
+        ));
     }
 
     let opts = AuditOptions {
@@ -70,16 +92,6 @@ fn run_fixture(dir: &std::path::Path) -> Result<(), String> {
         fail_on_warn: false,
     };
     let report = audit(&opts).map_err(|e| format!("audit failed: {e}"))?;
-
-    let expected_text = std::fs::read_to_string(&expected_path)
-        .map_err(|e| format!("read expected.json: {e}"))?;
-
-    // Parse minimal subset: expected_findings[].package/version/verdict/signals_contain
-    // and expected_clean[]. We use targeted string parsing rather than a
-    // full JSON dependency since vetpkg has zero crate deps and pulling
-    // serde for a test-only path violates the discipline. The format is
-    // small and stable.
-    let expected = parse_expected(&expected_text)?;
 
     for ef in &expected.findings {
         let f = report
@@ -134,6 +146,50 @@ fn run_fixture(dir: &std::path::Path) -> Result<(), String> {
         }
     }
 
+    Ok(())
+}
+
+/// Intel-driven fixture: construct a PackageIntel from intel.json and
+/// run score_tier0() against the orchestrator.
+fn run_intel_fixture(
+    intel_path: &std::path::Path,
+    expected: &Expected,
+) -> Result<(), String> {
+    let intel_text = std::fs::read_to_string(intel_path)
+        .map_err(|e| format!("read intel.json: {e}"))?;
+    let intel = parse_intel(&intel_text)?;
+    let orch = TierOrchestrator::default();
+    let result = orch.score_tier0(&intel);
+    let labels: Vec<String> = result.signals.iter().map(signal_short_label).collect();
+
+    if expected.findings.len() != 1 {
+        return Err(format!(
+            "intel-driven fixture must declare exactly 1 expected_finding (got {})",
+            expected.findings.len()
+        ));
+    }
+    let ef = &expected.findings[0];
+    if intel.name != ef.package || intel.version != ef.version {
+        return Err(format!(
+            "intel.json package/version ({}@{}) doesn't match expected_findings[0] ({}@{})",
+            intel.name, intel.version, ef.package, ef.version
+        ));
+    }
+    if result.verdict != ef.verdict {
+        return Err(format!(
+            "{}@{}: expected verdict {:?}, got {:?} (signals: {:?})",
+            ef.package, ef.version, ef.verdict, result.verdict, labels
+        ));
+    }
+    for needle in &ef.signals_contain {
+        let hit = labels.iter().any(|l| l.contains(needle));
+        if !hit {
+            return Err(format!(
+                "{}@{}: expected signal containing {:?}, got: {:?}",
+                ef.package, ef.version, needle, labels
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -270,6 +326,157 @@ fn parse_string_array(s: &str) -> Vec<String> {
                 for _ in 0..skip {
                     iter.next();
                 }
+            }
+        }
+    }
+    out
+}
+
+fn extract_u64(text: &str, key: &str) -> Option<u64> {
+    let needle = format!("\"{key}\"");
+    let pos = text.find(&needle)?;
+    let after_key = text[pos + needle.len()..].trim_start();
+    let after_colon = after_key.strip_prefix(':')?.trim_start();
+    let mut end = 0;
+    for c in after_colon.chars() {
+        if c.is_ascii_digit() {
+            end += c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if end == 0 {
+        None
+    } else {
+        after_colon[..end].parse().ok()
+    }
+}
+
+fn extract_f64(text: &str, key: &str) -> Option<f64> {
+    let needle = format!("\"{key}\"");
+    let pos = text.find(&needle)?;
+    let after_key = text[pos + needle.len()..].trim_start();
+    let after_colon = after_key.strip_prefix(':')?.trim_start();
+    let mut end = 0;
+    for c in after_colon.chars() {
+        if c.is_ascii_digit() || c == '.' || c == '-' {
+            end += c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if end == 0 {
+        None
+    } else {
+        after_colon[..end].parse().ok()
+    }
+}
+
+fn extract_u32(text: &str, key: &str) -> Option<u32> {
+    extract_u64(text, key).and_then(|v| u32::try_from(v).ok())
+}
+
+/// Parse a fixture's intel.json into a PackageIntel.
+///
+/// Schema (zero-dep, targeted parsing):
+/// ```json
+/// {
+///   "name": "...",
+///   "version": "...",
+///   "ecosystem": "npm" | "pypi" | "cargo",
+///   "maintainers": ["a@b.c"],
+///   "prior_maintainers": [...],
+///   "publish_time": <unix_seconds>,
+///   "dependencies": ["foo", ...],
+///   "prior_dependencies": [...],
+///   "install_hooks": [{"stage":"postinstall","command":"..."}],
+///   "advisories": [{"id":"GHSA-...","severity":"high","summary":"..."}],
+///   "typosquat_matches": ["express"],
+///   "age_hours": 0.5,
+///   "popularity_rank": 100
+/// }
+/// ```
+fn parse_intel(text: &str) -> Result<PackageIntel, String> {
+    let name = extract_string(text, "name")
+        .ok_or_else(|| "intel.json: missing name".to_string())?;
+    let version = extract_string(text, "version")
+        .ok_or_else(|| "intel.json: missing version".to_string())?;
+
+    let ecosystem = extract_string(text, "ecosystem").map(|s| match s.as_str() {
+        "npm" => Ecosystem::Npm,
+        "pypi" => Ecosystem::PyPI,
+        "cargo" => Ecosystem::Cargo,
+        _ => Ecosystem::Npm,
+    });
+
+    let maintainers = extract_string_array(text, "maintainers").unwrap_or_default();
+    let prior_maintainers = extract_string_array(text, "prior_maintainers").unwrap_or_default();
+    let dependencies = extract_string_array(text, "dependencies").unwrap_or_default();
+    let prior_dependencies =
+        extract_string_array(text, "prior_dependencies").unwrap_or_default();
+    let typosquat_matches =
+        extract_string_array(text, "typosquat_matches").unwrap_or_default();
+
+    let publish_time = extract_u64(text, "publish_time");
+    let age_hours = extract_f64(text, "age_hours");
+    let popularity_rank = extract_u32(text, "popularity_rank");
+
+    let install_hooks = parse_install_hooks(text);
+    let advisories = parse_advisories(text);
+
+    Ok(PackageIntel {
+        ecosystem,
+        name,
+        version,
+        maintainers,
+        prior_maintainers,
+        publish_time,
+        publish_history: Vec::new(),
+        dependencies,
+        prior_dependencies,
+        install_hooks,
+        advisories,
+        typosquat_matches,
+        age_hours,
+        dep_ages: std::collections::HashMap::new(),
+        popularity_rank,
+    })
+}
+
+fn parse_install_hooks(text: &str) -> Vec<InstallHook> {
+    let mut out = Vec::new();
+    if let Some(arr) = extract_array(text, "install_hooks") {
+        for obj in split_top_level_objects(&arr) {
+            let stage = extract_string(&obj, "stage").unwrap_or_default();
+            let command = extract_string(&obj, "command").unwrap_or_default();
+            if !stage.is_empty() {
+                out.push(InstallHook { stage, command });
+            }
+        }
+    }
+    out
+}
+
+fn parse_advisories(text: &str) -> Vec<Advisory> {
+    let mut out = Vec::new();
+    if let Some(arr) = extract_array(text, "advisories") {
+        for obj in split_top_level_objects(&arr) {
+            let id = extract_string(&obj, "id").unwrap_or_default();
+            let severity_s = extract_string(&obj, "severity").unwrap_or_default();
+            let summary = extract_string(&obj, "summary").unwrap_or_default();
+            let severity = match severity_s.as_str() {
+                "critical" | "Critical" => IntelSeverity::Critical,
+                "high" | "High" => IntelSeverity::High,
+                "medium" | "Medium" | "moderate" => IntelSeverity::Medium,
+                "low" | "Low" => IntelSeverity::Low,
+                _ => IntelSeverity::Unknown,
+            };
+            if !id.is_empty() {
+                out.push(Advisory {
+                    id,
+                    severity,
+                    summary,
+                });
             }
         }
     }
