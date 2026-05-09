@@ -1,0 +1,15 @@
+{
+  "name": "@hash-validator/v2",
+  "version": "1.22.11",
+  "ecosystem": "npm",
+  "maintainers": ["sk-ai-agent-team"],
+  "prior_maintainers": ["sk-ai-agent-team"],
+  "publish_time": 1714003200,
+  "dependencies": [],
+  "prior_dependencies": [],
+  "install_hooks": [],
+  "advisories": [],
+  "typosquat_matches": [],
+  "age_hours": 720.0,
+  "popularity_rank": 8000
+}

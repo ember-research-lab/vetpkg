@@ -1,6 +1,6 @@
 //! Threat-intel fixture regression test for vetpkg.
 //!
-//! Two fixture shapes supported:
+//! Three fixture shapes supported:
 //!
 //! 1. **Lockfile-driven** (`lockfile.json` + `expected.json`):
 //!    feeds the lockfile through `audit()`, asserts pinned package-
@@ -15,15 +15,31 @@
 //!    MaintainerChange (dormancy → activity), AdvisoryCheck (custom
 //!    OSV match), FreshPackage, PopularityAnomaly.
 //!
-//! A fixture provides exactly one of `lockfile.json` or `intel.json`.
-//! Both forms share the same `expected.json` schema for the parts
-//! they have in common (`expected_findings`, `expected_clean`).
+//! 3. **Tarball-driven** (`intel.json` + `extracted/` directory +
+//!    `expected.json`): runs the full `score_tarball()` path against
+//!    a synthetic file tree. Covers BinaryBlobDetection (blob entropy,
+//!    compressed-inside-tarball, novel-or-changed blobs),
+//!    BuildScriptDiff (build-script changes between versions), and
+//!    TaintDetection (sensitive sinks in changed source files).
+//!
+//! A fixture provides ONE of: lockfile.json | intel.json (alone) |
+//! intel.json + extracted/. Detection: presence of `extracted/`
+//! triggers tarball mode; presence of `lockfile.json` triggers
+//! audit mode; otherwise intel-driven.
+//!
+//! All shapes share the same `expected.json` schema:
+//!   {
+//!     "expected_findings": [{package, version, verdict, signals_contain}],
+//!     "expected_clean": ["package-name", ...]   // lockfile-driven only
+//!   }
 //!
 //! Adding a fixture is a directory drop — no code change required.
 
 use std::path::PathBuf;
 use vetpkg::cli::audit::{audit, AuditOptions};
 use vetpkg::engine::orchestrator::{signal_short_label, TierOrchestrator};
+use vetpkg::signals::binary_blob::BlobInventory;
+use vetpkg::signals::build_diff::BuildScriptCache;
 use vetpkg::types::{
     Advisory, Ecosystem, InstallHook, PackageIntel, Severity as IntelSeverity, Verdict,
 };
@@ -66,6 +82,7 @@ fn all_threat_intel_fixtures_match_expected() {
 fn run_fixture(dir: &std::path::Path) -> Result<(), String> {
     let lockfile = dir.join("lockfile.json");
     let intel_path = dir.join("intel.json");
+    let extracted_dir = dir.join("extracted");
     let expected_path = dir.join("expected.json");
     if !expected_path.exists() {
         return Err(format!("missing expected.json in {}", dir.display()));
@@ -75,12 +92,17 @@ fn run_fixture(dir: &std::path::Path) -> Result<(), String> {
         .map_err(|e| format!("read expected.json: {e}"))?;
     let expected = parse_expected(&expected_text)?;
 
+    // Tarball-driven: intel.json + extracted/ both present.
+    if intel_path.exists() && extracted_dir.exists() && extracted_dir.is_dir() {
+        return run_tarball_fixture(&intel_path, &extracted_dir, &expected);
+    }
+    // Intel-only.
     if intel_path.exists() {
         return run_intel_fixture(&intel_path, &expected);
     }
     if !lockfile.exists() {
         return Err(format!(
-            "fixture {} has neither lockfile.json nor intel.json",
+            "fixture {} has neither lockfile.json, intel.json, nor extracted/",
             dir.display()
         ));
     }
@@ -165,6 +187,81 @@ fn run_intel_fixture(
     if expected.findings.len() != 1 {
         return Err(format!(
             "intel-driven fixture must declare exactly 1 expected_finding (got {})",
+            expected.findings.len()
+        ));
+    }
+    let ef = &expected.findings[0];
+    if intel.name != ef.package || intel.version != ef.version {
+        return Err(format!(
+            "intel.json package/version ({}@{}) doesn't match expected_findings[0] ({}@{})",
+            intel.name, intel.version, ef.package, ef.version
+        ));
+    }
+    if result.verdict != ef.verdict {
+        return Err(format!(
+            "{}@{}: expected verdict {:?}, got {:?} (signals: {:?})",
+            ef.package, ef.version, ef.verdict, result.verdict, labels
+        ));
+    }
+    for needle in &ef.signals_contain {
+        let hit = labels.iter().any(|l| l.contains(needle));
+        if !hit {
+            return Err(format!(
+                "{}@{}: expected signal containing {:?}, got: {:?}",
+                ef.package, ef.version, needle, labels
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Tarball-driven fixture: `intel.json` carries the package metadata
+/// (for tier0 priors), `extracted/` is a synthetic file tree as a
+/// real tarball would expand, and the runner calls `score_tarball()`
+/// with empty BlobInventory + BuildScriptCache (the "fresh install"
+/// case — no prior tarballs to diff against).
+///
+/// Fixtures wanting to test diff-shaped signals (BuildScriptDiff
+/// across versions, ChangedExistingBlob) can extend this runner with
+/// `prior_blobs.json` / `prior_build.json` files as a future
+/// improvement. The empty-prior path covers the high-leverage
+/// cases (PromptMink-style binary blobs, install-time taint, novel
+/// build scripts in v1).
+fn run_tarball_fixture(
+    intel_path: &std::path::Path,
+    extracted_dir: &std::path::Path,
+    expected: &Expected,
+) -> Result<(), String> {
+    let intel_text = std::fs::read_to_string(intel_path)
+        .map_err(|e| format!("read intel.json: {e}"))?;
+    let intel = parse_intel(&intel_text)?;
+
+    // Tier0 priors come from the intel.json; suspicion-map is shared
+    // with score_tarball internally so we run tier0 first to populate
+    // it, then score_tarball.
+    let orch = TierOrchestrator::default();
+    let _ = orch.score_tier0(&intel);
+
+    let prior_blobs = BlobInventory::default();
+    let prior_build = BuildScriptCache::default();
+    let is_patch_bump = false;
+
+    let result = orch
+        .score_tarball(
+            &intel.name,
+            &intel.version,
+            extracted_dir,
+            &prior_blobs,
+            &prior_build,
+            is_patch_bump,
+        )
+        .map_err(|e| format!("score_tarball: {e}"))?;
+
+    let labels: Vec<String> = result.signals.iter().map(signal_short_label).collect();
+
+    if expected.findings.len() != 1 {
+        return Err(format!(
+            "tarball-driven fixture must declare exactly 1 expected_finding (got {})",
             expected.findings.len()
         ));
     }

@@ -37,16 +37,30 @@ Versions track `Cargo.toml`'s `version`.
   account-suddenly-active. New `DormantMaintainer` signal tracked for
   v1.5 hardening. Fixture: `is_package_jul2025/` (intel-driven).
 
+- **PromptMink / Famous Chollima** (ReversingLabs Apr 29 2026): DPRK
+  npm campaign, 60+ packages with novel LLMO TTP — gaming AI
+  dependency selection rather than human review. Defeat strategy:
+  SEA bundles + NAPI-RS Rust addons that read clean to LLM source
+  review while harm lives in the binary. Fixture exercises the new
+  tarball-driven path: synthetic high-entropy bytes in
+  `native/addon.node` + `dist/sea-bundle` trigger
+  BinaryBlobDetection (NewHighEntropyElsewhere) twice → Warn.
+  Block requires DormantMaintainer + LLMOPattern, both v1.5
+  hardening items. Fixture: `promptmink_famous_chollima_apr2026/`
+  (tarball-driven).
+
 ### Runner extensions
-- Threat-intel runner now supports **two fixture shapes**:
+- Threat-intel runner now supports **three fixture shapes**:
   · lockfile-driven (`lockfile.json` → `audit()`)
   · intel-driven (`intel.json` → `score_tier0()`)
-  A fixture provides exactly one of the two. Intel-driven covers
-  the signal paths that need fields beyond a lockfile entry:
-  HookCheck, PublishAnomaly, MaintainerChange, AdvisoryCheck,
-  FreshPackage, NewDependency, PopularityAnomaly. Tarball-driven
-  (BinaryBlobDetection, BuildScriptDiff, TaintDetection) is a future
-  follow-up.
+  · tarball-driven (`intel.json` + `extracted/` → `score_tarball()`)
+  Detection: presence of `extracted/` triggers tarball mode;
+  presence of `lockfile.json` triggers audit mode; otherwise
+  intel-driven. Fixtures provide one shape only.
+  Tarball-driven uses empty BlobInventory + BuildScriptCache
+  (the "fresh install" case); diff-shaped signals across
+  versions are deferred to a future runner extension that
+  loads `prior_blobs.json` / `prior_build.json`.
 
 ### Integration
 - `~/.ember/vetpkg/findings.jsonl` now produced on Warn/Block verdicts
