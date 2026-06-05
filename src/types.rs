@@ -132,6 +132,13 @@ pub enum PublishAnomalyKind {
     Cadence,
     HourOfDay,
     VersionSequence,
+    /// Maintainer set unchanged + previous publish was > 12 months
+    /// ago. Catches the canonical hijack-of-popular-package shape:
+    /// same account, long-dormant, then suddenly active. Distinct
+    /// from MaintainerChange (which catches *new* maintainers).
+    /// Source: is_package_jul2025 incident; tracked since corpus
+    /// extension §2.1.
+    DormantMaintainer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,6 +179,10 @@ impl Signal {
                 PublishAnomalyKind::Cadence => 0.15,
                 PublishAnomalyKind::HourOfDay => 0.10,
                 PublishAnomalyKind::VersionSequence => 0.10,
+                // Higher weight than other publish anomalies because
+                // dormant-account compromise with new behaviour is a
+                // strong-signal hijack pattern, not a calibration blip.
+                PublishAnomalyKind::DormantMaintainer => 0.30,
             },
             Signal::BinaryBlobDetection { kind, .. } => match kind {
                 BlobKind::NewHighEntropyInTestDir => 0.25,
