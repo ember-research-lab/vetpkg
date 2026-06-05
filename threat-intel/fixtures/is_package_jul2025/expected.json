@@ -1,0 +1,12 @@
+{
+  "fixture": "is_package_jul2025",
+  "_note": "Jul 19 2025: the popular `is` npm package was hijacked via old-maintainer-account compromise. Malicious versions 3.3.1 and 5.0.0 were published. The differentiating signal vs. fresh-publisher attacks: same maintainer account, but long-dormant. The new DormantMaintainer publish-anomaly kind (added 2026-05-09 to close the gap this fixture originally documented) catches the shape: maintainer set unchanged + previous publish > 12 months ago. publish_history shows publishes through 2017 then a 7-year gap before 2024-07. Four signals now fire: Hook(postinstall) + Fresh(0.5h) + Publish(Cadence) + Publish(DormantMaintainer) → Block.\n\nThe fixture serves as the regression test for the DormantMaintainer signal — was the canonical 'gap pin' in the corpus before the signal landed; now pins the closed-gap behaviour.\n\nSources: Avertium / CrowdStrike Jul 18-19 2025; Socket. Corpus extension §2.1.",
+  "expected_findings": [
+    {
+      "package": "is",
+      "version": "5.0.0",
+      "verdict": "Block",
+      "signals_contain": ["Hook(postinstall", "Fresh(", "Publish(DormantMaintainer)", "Publish(Cadence)"]
+    }
+  ]
+}

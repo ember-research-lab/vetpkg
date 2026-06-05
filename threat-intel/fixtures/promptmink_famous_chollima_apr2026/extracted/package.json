@@ -1,0 +1,8 @@
+{
+  "name": "@hash-validator/v2",
+  "version": "1.22.11",
+  "main": "index.js",
+  "files": ["native/addon.node", "dist/sea-bundle"],
+  "description": "High-performance hash validation utilities. Drop-in replacement for legacy validators with optimized native bindings.",
+  "keywords": ["hash", "validator", "performance", "native", "ai-ready", "llm-friendly"]
+}

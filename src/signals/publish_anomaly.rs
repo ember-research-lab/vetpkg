@@ -36,8 +36,73 @@ impl Check for PublishAnomalyCheck {
         if let Some(signal) = check_version_sequence(&intel.publish_history, &latest.0) {
             out.push(signal);
         }
+        if let Some(signal) = check_dormant_maintainer(intel, latest.1) {
+            out.push(signal);
+        }
         out
     }
+}
+
+/// Catch hijack-of-popular-package via dormant-account compromise.
+///
+/// The pattern: maintainer set is unchanged (NOT a MaintainerChange
+/// event) but the account's previous publish was a long time ago.
+/// Real-world example: `is` package hijack Jul 19 2025 — versions
+/// 3.3.1 and 5.0.0 published from a long-dormant maintainer account
+/// after that account was compromised.
+///
+/// Conservative thresholds:
+///   - Requires ≥1 prior publish in `publish_history` (otherwise we
+///     can't distinguish dormant from brand-new maintainer).
+///   - Maintainers must equal prior_maintainers (not a maintainer
+///     change — that fires its own signal).
+///   - Gap between previous publish and latest publish > 1 year
+///     (DORMANCY_THRESHOLD_SECS).
+fn check_dormant_maintainer(intel: &PackageIntel, latest_time: u64) -> Option<Signal> {
+    const DORMANCY_THRESHOLD_SECS: u64 = 365 * 24 * 60 * 60;
+
+    if intel.publish_history.len() < 2 {
+        return None;
+    }
+    if intel.maintainers.is_empty() {
+        return None;
+    }
+    // Maintainer-change has its own signal; dormant requires the same
+    // account.
+    let mut current_sorted = intel.maintainers.clone();
+    let mut prior_sorted = intel.prior_maintainers.clone();
+    current_sorted.sort();
+    prior_sorted.sort();
+    if current_sorted != prior_sorted {
+        return None;
+    }
+
+    // Find the most recent prior publish (excluding the current one).
+    let mut prior_timestamps: Vec<u64> = intel
+        .publish_history
+        .iter()
+        .filter(|(_, t)| *t != latest_time)
+        .map(|(_, t)| *t)
+        .collect();
+    if prior_timestamps.is_empty() {
+        return None;
+    }
+    prior_timestamps.sort();
+    let prev_time = *prior_timestamps.last()?;
+    let gap_secs = latest_time.saturating_sub(prev_time);
+    if gap_secs < DORMANCY_THRESHOLD_SECS {
+        return None;
+    }
+
+    let dormancy_days = gap_secs / 86_400;
+    Some(Signal::PublishAnomaly {
+        kind: PublishAnomalyKind::DormantMaintainer,
+        detail: format!(
+            "maintainer account dormant for {} days before this publish; \
+             same maintainer set, no change event",
+            dormancy_days
+        ),
+    })
 }
 
 fn find_latest(intel: &PackageIntel) -> Option<(String, u64)> {

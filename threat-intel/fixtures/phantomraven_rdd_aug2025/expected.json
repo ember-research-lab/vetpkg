@@ -1,0 +1,19 @@
+{
+  "fixture": "phantomraven_rdd_aug2025",
+  "_note": "PhantomRaven (Koi Security Oct 29-31 2025): 126 npm packages, 86,000+ installs. Novel TTP: Remote Dynamic Dependencies — packages declare HTTP-URL dependencies pointing to attacker-controlled domains (packages.storeartifact.com). npm fetches at install time but registry-based scanners ignore the URL. Static analysis sees `0 dependencies`. Catch path: vetpkg's check_resolved_urls fires Signal::ResolvedUrlMismatch when a lockfile's `resolved` field points outside the expected registry host, regardless of integrity hash.\n\nThe corpus extension §2.1 also calls for treating any HTTP-URL dependency as CRITICAL; the v0.3 catch fires WARN. Severity escalation to CRITICAL for non-registry hosts is a v1.5 hardening item — fixture pins current behaviour so the change is detectable when it lands.",
+  "expected_findings": [
+    {
+      "package": "phantomraven-bait",
+      "version": "1.2.3",
+      "verdict": "Warn",
+      "signals_contain": ["Resolved(phantomraven-bait"]
+    },
+    {
+      "package": "@helpful-utils/parser",
+      "version": "2.0.0",
+      "verdict": "Warn",
+      "signals_contain": ["Resolved(@helpful-utils/parser"]
+    }
+  ],
+  "expected_clean": ["express", "lodash"]
+}
