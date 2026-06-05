@@ -1,0 +1,15 @@
+{
+  "name": "innocuous-helper",
+  "version": "1.0.0",
+  "ecosystem": "npm",
+  "maintainers": ["legit-author"],
+  "prior_maintainers": ["legit-author"],
+  "publish_time": 1764547200,
+  "dependencies": [],
+  "prior_dependencies": [],
+  "install_hooks": [],
+  "advisories": [],
+  "typosquat_matches": [],
+  "age_hours": 168.0,
+  "popularity_rank": 5000
+}

@@ -1,0 +1,12 @@
+{
+  "fixture": "promptmink_famous_chollima_apr2026",
+  "_note": "Apr 29 2026 ReversingLabs disclosure: 60+ npm packages, 300+ versions, 4 distinct payload architectures. Attributed to Famous Chollima (DPRK). Novel TTP: **LLM Optimization (LLMO) abuse** — first campaign engineered specifically to deceive AI coding agents rather than human developers. Pivot to SEA bundles + NAPI-RS Rust addons specifically engineered to defeat LLM-based source review (the JS shim is clean to a reviewer; harm lives in the .node binary).\n\nFixture: tarball-driven path. Synthetic /dev/urandom bytes in native/addon.node + dist/sea-bundle (NO real malware — the harm is structural: vetpkg should flag any high-entropy non-source binary in a non-test directory). Two BinaryBlobDetection signals fire (NewHighEntropyElsewhere). Verdict Warn — single layer. Block requires additional signals (DormantMaintainer for the Layer 2 burn pattern, plus a yet-unimplemented LLMOPattern signal for sequential republishing fingerprint).\n\nThis is the canonical tarball-driven fixture and the first to exercise BinaryBlobDetection in the corpus. Documents that Rust-NAPI/SEA-bundle delivery shapes get caught at install time regardless of whether the JS shim reads cleanly to an LLM.\n\nSources: ReversingLabs Apr 29 2026 (PromptMink); Barrack AI analysis; corpus extension §2.1 + §3.4.",
+  "expected_findings": [
+    {
+      "package": "@hash-validator/v2",
+      "version": "1.22.11",
+      "verdict": "Warn",
+      "signals_contain": ["Blob(NewHighEntropyElsewhere:dist/sea-bundle)", "Blob(NewHighEntropyElsewhere:native/addon.node)"]
+    }
+  ]
+}
