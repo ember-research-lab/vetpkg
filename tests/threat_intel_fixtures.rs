@@ -88,8 +88,8 @@ fn run_fixture(dir: &std::path::Path) -> Result<(), String> {
         return Err(format!("missing expected.json in {}", dir.display()));
     }
 
-    let expected_text = std::fs::read_to_string(&expected_path)
-        .map_err(|e| format!("read expected.json: {e}"))?;
+    let expected_text =
+        std::fs::read_to_string(&expected_path).map_err(|e| format!("read expected.json: {e}"))?;
     let expected = parse_expected(&expected_text)?;
 
     // Tarball-driven: intel.json + extracted/ both present.
@@ -173,12 +173,9 @@ fn run_fixture(dir: &std::path::Path) -> Result<(), String> {
 
 /// Intel-driven fixture: construct a PackageIntel from intel.json and
 /// run score_tier0() against the orchestrator.
-fn run_intel_fixture(
-    intel_path: &std::path::Path,
-    expected: &Expected,
-) -> Result<(), String> {
-    let intel_text = std::fs::read_to_string(intel_path)
-        .map_err(|e| format!("read intel.json: {e}"))?;
+fn run_intel_fixture(intel_path: &std::path::Path, expected: &Expected) -> Result<(), String> {
+    let intel_text =
+        std::fs::read_to_string(intel_path).map_err(|e| format!("read intel.json: {e}"))?;
     let intel = parse_intel(&intel_text)?;
     let orch = TierOrchestrator::default();
     let result = orch.score_tier0(&intel);
@@ -232,8 +229,8 @@ fn run_tarball_fixture(
     extracted_dir: &std::path::Path,
     expected: &Expected,
 ) -> Result<(), String> {
-    let intel_text = std::fs::read_to_string(intel_path)
-        .map_err(|e| format!("read intel.json: {e}"))?;
+    let intel_text =
+        std::fs::read_to_string(intel_path).map_err(|e| format!("read intel.json: {e}"))?;
     let intel = parse_intel(&intel_text)?;
 
     // Tier0 priors come from the intel.json; suspicion-map is shared
@@ -313,8 +310,10 @@ fn parse_expected(text: &str) -> Result<Expected, String> {
     // matching.
     if let Some(arr) = extract_array(text, "expected_findings") {
         for obj in split_top_level_objects(&arr) {
-            let pkg = extract_string(&obj, "package").ok_or("expected_findings: missing package")?;
-            let ver = extract_string(&obj, "version").ok_or("expected_findings: missing version")?;
+            let pkg =
+                extract_string(&obj, "package").ok_or("expected_findings: missing package")?;
+            let ver =
+                extract_string(&obj, "version").ok_or("expected_findings: missing version")?;
             let verdict_s =
                 extract_string(&obj, "verdict").ok_or("expected_findings: missing verdict")?;
             let verdict = match verdict_s.as_str() {
@@ -494,10 +493,10 @@ fn extract_u32(text: &str, key: &str) -> Option<u32> {
 /// }
 /// ```
 fn parse_intel(text: &str) -> Result<PackageIntel, String> {
-    let name = extract_string(text, "name")
-        .ok_or_else(|| "intel.json: missing name".to_string())?;
-    let version = extract_string(text, "version")
-        .ok_or_else(|| "intel.json: missing version".to_string())?;
+    let name =
+        extract_string(text, "name").ok_or_else(|| "intel.json: missing name".to_string())?;
+    let version =
+        extract_string(text, "version").ok_or_else(|| "intel.json: missing version".to_string())?;
 
     let ecosystem = extract_string(text, "ecosystem").map(|s| match s.as_str() {
         "npm" => Ecosystem::Npm,
@@ -509,10 +508,8 @@ fn parse_intel(text: &str) -> Result<PackageIntel, String> {
     let maintainers = extract_string_array(text, "maintainers").unwrap_or_default();
     let prior_maintainers = extract_string_array(text, "prior_maintainers").unwrap_or_default();
     let dependencies = extract_string_array(text, "dependencies").unwrap_or_default();
-    let prior_dependencies =
-        extract_string_array(text, "prior_dependencies").unwrap_or_default();
-    let typosquat_matches =
-        extract_string_array(text, "typosquat_matches").unwrap_or_default();
+    let prior_dependencies = extract_string_array(text, "prior_dependencies").unwrap_or_default();
+    let typosquat_matches = extract_string_array(text, "typosquat_matches").unwrap_or_default();
 
     let publish_time = extract_u64(text, "publish_time");
     let age_hours = extract_f64(text, "age_hours");
