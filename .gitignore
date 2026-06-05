@@ -8,4 +8,5 @@ Thumbs.db
 *.swp
 
 # Local Claude Code state (handoffs, summaries)
-.claude/
+.claude/*
+!.claude/settings.json
