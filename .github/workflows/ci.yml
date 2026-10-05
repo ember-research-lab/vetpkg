@@ -17,6 +17,7 @@ jobs:
   test:
     name: ${{ matrix.os }} / ${{ matrix.toolchain }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +57,7 @@ jobs:
   cargo-deny:
     name: cargo-deny
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -73,6 +75,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -93,6 +96,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: release-create
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     permissions:
       contents: write
     strategy:
