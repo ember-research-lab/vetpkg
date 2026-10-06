@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- CI: every job has `timeout-minutes` (whale-signal#258).
+
 ### Added
 - New `PublishAnomalyKind::DormantMaintainer` signal. Catches the
   hijack-of-popular-package shape: maintainer set unchanged +
