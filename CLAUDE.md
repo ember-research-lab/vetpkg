@@ -59,6 +59,6 @@ All four (build/test/clippy/fmt) must pass locally before opening a PR. Integrat
 - **No `cargo install vetpkg`, no self-update.** Build-from-source is the only supported install/upgrade path — that's precisely the attack vector vetpkg defends against. A `vetpkg` crate on crates.io is not us.
 - **Known v1 gaps are documented, not hidden** — e.g. the findings log is unsigned (see `docs/threat-model.md` §4). Don't paper over them.
 
-## Commit format
+## Commit deltas (format: workspace CLAUDE.md)
 
-`type(scope): description — detail`, e.g. `fix(proxy): validate tarball filename before fs access — closes path-escape gap`. Types: `feat`, `fix`, `test`, `docs`, `refactor`, `chore`, `style`, `ci`. One logical change per commit; every commit must build, pass `cargo test`, and pass clippy `-D warnings`. Substrate changes (`net/`, `engine/`, the JSON parser, signals, findings-log surface) get two-human review and a CHANGELOG entry under both `CHANGELOG.md` and `threat-intel/CHANGELOG.md`. Security issues go through `SECURITY.md`, never a public issue.
+Extra types `style`, `ci`. Substrate changes (`net/`, `engine/`, the JSON parser, signals, findings-log surface) get two-human review and an entry in both `CHANGELOG.md` and `threat-intel/CHANGELOG.md`. Security issues go through `SECURITY.md`, never a public issue.
