@@ -156,10 +156,7 @@ fn check_cadence(history: &[(String, u64)], latest_time: u64) -> Option<Signal> 
     // the `truncated.len() < 5` check above currently guarantees
     // `prior.len() >= 4`, but we don't want a hot-path metadata response
     // scan to panic if the invariant is ever relaxed.
-    let prev_time = match prior.last() {
-        Some(t) => *t,
-        None => return None,
-    };
+    let prev_time = *prior.last()?;
     let latest_interval = latest_time.saturating_sub(prev_time).max(1);
     let latest_log = (latest_interval as f64).ln();
     let deviation = (latest_log - mean).abs();
