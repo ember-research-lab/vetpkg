@@ -1,6 +1,6 @@
 # vetpkg
 
-A local proxy registry that intercepts package-manager installs (npm, with PyPI and Cargo adapters available) and scores them against supply-chain security signals. Blocks known-bad versions, annotates suspicious ones, streams clean ones through untouched.
+A local proxy registry that intercepts package-manager installs (npm is the only active proxy route; PyPI and Cargo have adapters but no proxy route yet) and scores them against supply-chain security signals. Blocks known-bad versions, annotates suspicious ones, streams clean ones through untouched.
 
 Built at [**Ember Research Lab**](https://ember-research-lab.github.io/) — independent research on spectral physics, AI alignment, and engineering.
 
