@@ -14,6 +14,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - `contrib/systemd/` units (proxy daemon, weekly `audit-ci --strict`) and a README "Dogfood" section.
+### Changed
+- CI: every job has `timeout-minutes` (whale-signal#258).
 
 ### Added
 - New `PublishAnomalyKind::DormantMaintainer` signal. Catches the
