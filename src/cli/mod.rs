@@ -2,6 +2,7 @@ use crate::types::PolicyConfig;
 
 pub mod audit;
 pub mod audit_ci;
+pub mod lockfile;
 
 pub fn run(args: Vec<String>) -> Result<u8, String> {
     let mut it = args.into_iter();

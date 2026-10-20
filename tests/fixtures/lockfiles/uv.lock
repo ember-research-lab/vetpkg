@@ -1,0 +1,51 @@
+version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[manifest]
+requirements = [{ name = "mcp", specifier = ">=1.22.0,<2" }]
+
+[[package]]
+name = "anyio"
+version = "4.11.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "idna" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/aa/anyio-4.11.0.tar.gz", hash = "sha256:0287e96f4d26d4149305414d4e3bc32f0dcd0862365a4bddea19d7a1ec38c4fc", size = 219094 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bb/anyio-4.11.0-py3-none-any.whl", hash = "sha256:0287e96f4d26d4149305414d4e3bc32f0dcd0862365a4bddea19d7a1ec38c4fc", size = 109097 },
+]
+
+[[package]]
+name = "idna"
+version = "3.10"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "mcp"
+version = "1.22.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+]
+
+[package.optional-dependencies]
+cli = [
+    { name = "idna" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "anyio", specifier = ">=4" }]
+
+[[package]]
+name = "sneaky"
+version = "0.1.0"
+source = { registry = "https://mirror.example.invalid/simple" }
+
+[[package]]
+name = "ember-local"
+source = { virtual = "." }
+dependencies = [
+    { name = "mcp" },
+]
