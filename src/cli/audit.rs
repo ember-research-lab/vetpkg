@@ -1,6 +1,7 @@
 //! `vetpkg audit` — lockfile audit subcommand.
 //!
-//! Lockfiles read: `package-lock.json` (npm v2/v3), and `Cargo.lock` (v3/v4). `--path DIR` audits every supported lockfile found in DIR
+//! Lockfiles read: `package-lock.json` (npm v2/v3), `Cargo.lock` (v3/v4) and
+//! `uv.lock` (v1). `--path DIR` audits every supported lockfile found in DIR
 //! and lists which; none found is a hard error naming the supported files.
 //!
 //! Scope without `--full`: score each resolved (name, version) from the
@@ -13,7 +14,7 @@
 //! and full signal battery. That code path arrives with the upstream-fetch
 //! layer and is stubbed with a clear error today.
 
-use super::lockfile::{parse_cargo_lock, LockEntry};
+use super::lockfile::{parse_cargo_lock, parse_uv_lock, LockEntry};
 use crate::engine::SecurityEngine;
 use crate::json::{parse, JsonValue};
 use crate::types::{Ecosystem, PackageIntel, PolicyConfig, Signal, Verdict};
@@ -51,6 +52,7 @@ pub struct LockfileInfo {
 pub enum LockfileKind {
     Npm,
     Cargo,
+    Uv,
 }
 
 impl LockfileKind {
@@ -58,6 +60,7 @@ impl LockfileKind {
         match self {
             LockfileKind::Npm => "package-lock.json",
             LockfileKind::Cargo => "Cargo.lock",
+            LockfileKind::Uv => "uv.lock",
         }
     }
 }
@@ -65,7 +68,8 @@ impl LockfileKind {
 /// Lockfile entries paired with source-derived extra signals.
 type Scored = Vec<(LockEntry, Vec<Signal>)>;
 
-const SUPPORTED_LOCKFILES: [LockfileKind; 2] = [LockfileKind::Npm, LockfileKind::Cargo];
+const SUPPORTED_LOCKFILES: [LockfileKind; 3] =
+    [LockfileKind::Npm, LockfileKind::Cargo, LockfileKind::Uv];
 
 #[derive(Debug, Clone)]
 pub struct AuditReport {
@@ -156,6 +160,10 @@ pub fn audit(opts: &AuditOptions) -> Result<AuditReport, String> {
                 let (v, e) =
                     parse_cargo_lock(&text).map_err(|e| format!("parse {:?}: {e}", path))?;
                 (v, with_source_signals(e, "crates.io"))
+            }
+            LockfileKind::Uv => {
+                let (v, e) = parse_uv_lock(&text).map_err(|e| format!("parse {:?}: {e}", path))?;
+                (v, with_source_signals(e, "pypi.org"))
             }
         };
         lockfiles.push(LockfileInfo {
@@ -631,7 +639,7 @@ mod tests {
     fn dir_without_lockfile_errors_listing_supported() {
         let d = tmpdir("none");
         let err = audit(&opts(d.clone())).unwrap_err();
-        for k in ["package-lock.json", "Cargo.lock"] {
+        for k in ["package-lock.json", "Cargo.lock", "uv.lock"] {
             assert!(err.contains(k), "{err}");
         }
         assert!(run(vec!["--path".into(), d.to_string_lossy().into_owned()]).is_err());
@@ -652,6 +660,26 @@ mod tests {
             run(vec!["--path".into(), d.to_string_lossy().into_owned()]).unwrap(),
             0
         );
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn mixed_dir_lists_every_lockfile_and_flags_foreign_source() {
+        let d = tmpdir("mixed");
+        fs::write(d.join("Cargo.lock"), fixture("cargo-deps.lock")).unwrap();
+        fs::write(d.join("uv.lock"), fixture("uv.lock")).unwrap();
+        let r = audit(&opts(d.clone())).unwrap();
+        let kinds: Vec<_> = r.lockfiles.iter().map(|l| l.kind).collect();
+        assert_eq!(kinds, [LockfileKind::Cargo, LockfileKind::Uv]);
+        assert_eq!(r.package_count, 5 + 4);
+        for n in ["weird-git", "sneaky"] {
+            let f = r.findings.iter().find(|f| f.name == n).unwrap();
+            assert!(f
+                .signals
+                .iter()
+                .any(|s| matches!(s, Signal::ResolvedUrlMismatch { .. })));
+        }
+        assert!(report_as_json(&r).contains("\"uv.lock\""));
         fs::remove_dir_all(d).unwrap();
     }
 

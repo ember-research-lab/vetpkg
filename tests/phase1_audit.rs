@@ -136,7 +136,7 @@ fn audit_missing_lockfile_clear_error() {
     let err = audit(&opts).unwrap_err();
     let err = err.to_lowercase();
     assert!(err.contains("no supported lockfile"));
-    for k in ["package-lock.json", "cargo.lock"] {
+    for k in ["package-lock.json", "cargo.lock", "uv.lock"] {
         assert!(err.contains(k), "{err}");
     }
 }

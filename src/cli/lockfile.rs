@@ -1,4 +1,4 @@
-//! lockfile — hand-written `Cargo.lock` front-end for `vetpkg audit`.
+//! lockfile — hand-written `Cargo.lock` and `uv.lock` front-ends for `vetpkg audit`.
 //!
 //! Both formats are TOML subsets. This module scans only what the audit needs
 //! (the `[[package]]` tables: name, version, source, checksum) with a
@@ -39,7 +39,8 @@ struct Scan {
 enum Section {
     Top,
     Package,
-    /// A sub-table of the current package or an explicitly ignorable top-level table. Keys are not read.
+    /// A sub-table of the current package (uv: `[package.metadata]`, ...) or
+    /// an explicitly ignorable top-level table. Keys are not read.
     Ignored,
 }
 
@@ -261,6 +262,66 @@ pub fn parse_cargo_lock(text: &str) -> Result<(u64, Vec<LockEntry>), String> {
     Ok((version, entries))
 }
 
+/// Registry URL prefixes treated as the default PyPI index in `uv.lock`.
+const PYPI_DEFAULT_REGISTRIES: [&str; 2] = ["https://pypi.org/simple", "https://pypi.org/simple/"];
+
+/// Parse a `uv.lock` (lockfile version 1). Local project packages with no
+/// version (virtual/editable roots with dynamic versions) are skipped; every
+/// other package must carry a version.
+pub fn parse_uv_lock(text: &str) -> Result<(u64, Vec<LockEntry>), String> {
+    let scan = scan(text, &["manifest", "options"], true)?;
+    let version = scan
+        .top_version
+        .ok_or("uv.lock has no top-level `version`")?;
+    if version != 1 {
+        return Err(format!(
+            "unsupported uv.lock version {version} (supported: 1)"
+        ));
+    }
+    let entries = finish(scan, Ecosystem::PyPI, |p, name| {
+        let raw = p
+            .source
+            .as_deref()
+            .ok_or_else(|| format!("line {}: package `{name}` has no source", p.line))?;
+        let inner = raw
+            .trim()
+            .strip_prefix('{')
+            .and_then(|r| r.strip_suffix('}'))
+            .ok_or_else(|| {
+                format!(
+                    "line {}: package `{name}` source is not an inline table: {raw}",
+                    p.line
+                )
+            })?
+            .trim();
+        let (kind, rest) = inner
+            .split_once('=')
+            .ok_or_else(|| format!("line {}: package `{name}` source has no key: {raw}", p.line))?;
+        let kind = kind.trim();
+        let target = unquote(rest.split(',').next().unwrap_or(""), kind, p.line)?;
+        let local = matches!(kind, "virtual" | "editable" | "directory" | "path");
+        let Some(version) = p.version.clone() else {
+            if local {
+                return Ok(None);
+            }
+            return Err(format!("line {}: package `{name}` has no version", p.line));
+        };
+        let foreign = match kind {
+            "registry" if PYPI_DEFAULT_REGISTRIES.contains(&target.as_str()) => None,
+            "virtual" | "editable" | "directory" | "path" => None,
+            "registry" | "git" | "url" => Some(format!("{kind}: {target}")),
+            other => {
+                return Err(format!(
+                    "line {}: package `{name}` has unsupported source kind `{other}`",
+                    p.line
+                ))
+            }
+        };
+        Ok(Some((version, foreign)))
+    })?;
+    Ok((version, entries))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +329,7 @@ mod tests {
     const CARGO_ZERO_DEPS: &str =
         include_str!("../../tests/fixtures/lockfiles/cargo-zero-deps.lock");
     const CARGO_DEPS: &str = include_str!("../../tests/fixtures/lockfiles/cargo-deps.lock");
+    const UV: &str = include_str!("../../tests/fixtures/lockfiles/uv.lock");
 
     #[test]
     fn cargo_zero_deps_lists_only_the_crate() {
@@ -313,5 +375,38 @@ mod tests {
         assert!(
             parse_cargo_lock("version = 3\n[[package]]\nname = \"a\"\ndependencies = [\n").is_err()
         );
+    }
+
+    #[test]
+    fn uv_lock_parses_packages_and_skips_virtual_root() {
+        let (v, e) = parse_uv_lock(UV).unwrap();
+        assert_eq!(v, 1);
+        let names: Vec<_> = e
+            .iter()
+            .map(|x| (x.name.as_str(), x.version.as_str()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("anyio", "4.11.0"),
+                ("idna", "3.10"),
+                ("mcp", "1.22.0"),
+                ("sneaky", "0.1.0")
+            ]
+        );
+        assert!(e.iter().all(|x| x.ecosystem == Ecosystem::PyPI));
+        assert_eq!(e.iter().filter(|x| x.foreign_source.is_some()).count(), 1);
+    }
+
+    #[test]
+    fn uv_rejects_bad_version_and_unknown_table() {
+        assert!(parse_uv_lock("version = 2\n")
+            .unwrap_err()
+            .contains("unsupported"));
+        assert!(parse_uv_lock("version = 1\n[nope]\n")
+            .unwrap_err()
+            .contains("unsupported table"));
+        let nover = "version = 1\n[[package]]\nname = \"a\"\nsource = { registry = \"https://pypi.org/simple\" }\n";
+        assert!(parse_uv_lock(nover).unwrap_err().contains("no version"));
     }
 }

@@ -13,12 +13,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `clippy::question_mark` in `signals/publish_anomaly.rs` (rustc 1.99) failed the `-D warnings` CI bar.
 
 ### Added
-- `vetpkg audit` reads `Cargo.lock` (v3/v4) besides `package-lock.json`; `--path DIR`
+- `vetpkg audit` reads `Cargo.lock` (v3/v4) and `uv.lock` (v1) besides `package-lock.json`; `--path DIR`
   audits and lists every supported lockfile found, lists every package, and a source outside the
   default registry raises `ResolvedUrlMismatch`. A directory with no supported lockfile is a hard
   error naming the supported files (`audit_missing_lockfile_clear_error`, `cli::audit` tests).
   Hand-written parsers, zero new crates. JSON output gains `lockfiles[]` and per-finding `ecosystem`.
-  `uv.lock` and `requirements.txt` with hashes are still open (#14).
+  `requirements.txt` with hashes is still open (#14).
 - `contrib/systemd/` units (proxy daemon, weekly `audit-ci --strict`) and a README "Dogfood" section.
 ### Changed
 - CI: every job has `timeout-minutes` (whale-signal#258).
