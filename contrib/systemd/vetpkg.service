@@ -1,0 +1,12 @@
+[Unit]
+Description=vetpkg — supply-chain proxy registry on 127.0.0.1:9451 (npm active; pip/cargo routes pending)
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/ember-suite/bin/vetpkg daemon
+Restart=on-failure
+RestartSec=5
+Environment=HOME=%h
+
+[Install]
+WantedBy=default.target
