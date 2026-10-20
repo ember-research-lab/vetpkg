@@ -22,6 +22,19 @@ use crate::net::streaming::stream_forward;
 use crate::signals::binary_blob::BlobInventory;
 use crate::signals::build_diff::BuildScriptCache;
 use crate::types::{PolicyConfig, Verdict};
+
+/// Hand Warn/Block verdicts to ember-agent-monitor via `~/.ember/vetpkg/findings.jsonl`
+/// (the suite's file contract; Allow is dropped inside `record_verdict`).
+fn record_finding(package: &str, version: &str, result: &crate::engine::TierResult) {
+    crate::store::findings_log::record_verdict(
+        package,
+        Some(version),
+        "npm",
+        result.score,
+        result.verdict,
+        &result.signals,
+    );
+}
 use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -249,6 +262,7 @@ fn serve_npm_metadata(
             let result = ctx.orch.score_tier0(&intel);
             let log = ctx.orch.log_line(package, &ver, &result);
             eprintln!("{log}");
+            record_finding(package, &ver, &result);
             if matches!(result.verdict, Verdict::Block) {
                 blocked.push(ver);
             }
@@ -416,6 +430,7 @@ fn analyze_tarball_bytes(
         }
     };
     eprintln!("{}", ctx.orch.log_line(package, version, &result));
+    record_finding(package, version, &result);
     if matches!(result.verdict, Verdict::Block) {
         AnalysisOutcome::Block(format!(
             "combined score {:.2} (t0={:.2} t1={:.2} t2={:.2})",
