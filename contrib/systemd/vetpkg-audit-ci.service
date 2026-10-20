@@ -1,0 +1,12 @@
+[Unit]
+Description=vetpkg audit-ci --strict over the ember-research-lab repos (non-zero = a workflow finding)
+
+[Service]
+Type=oneshot
+# One ExecStart per repo; systemd stops at the first failing one (the unit then fails loudly).
+ExecStart=%h/.local/share/ember-suite/bin/vetpkg audit-ci --strict --path %h/ember-research-lab/ember-agent-monitor
+ExecStart=%h/.local/share/ember-suite/bin/vetpkg audit-ci --strict --path %h/ember-research-lab/ember-network
+ExecStart=%h/.local/share/ember-suite/bin/vetpkg audit-ci --strict --path %h/ember-research-lab/ember-persistent
+ExecStart=%h/.local/share/ember-suite/bin/vetpkg audit-ci --strict --path %h/ember-research-lab/vetpkg
+ExecStart=%h/.local/share/ember-suite/bin/vetpkg audit-ci --strict --path %h/ember-research-lab/ember-local
+Environment=HOME=%h

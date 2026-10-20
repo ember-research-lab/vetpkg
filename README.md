@@ -105,6 +105,20 @@ Flags: `--path DIR`, `--online` (fetch GitHub tag refs for mutation detection), 
 - `policy` — print effective threshold and upstream configuration
 - `init` — write default config + pattern files to `{config_dir}/vetpkg/`
 
+## Dogfood (Ember lab)
+
+```bash
+# lockfile-less CI audit over the lab repos (exit 1 on any Medium+ with --strict):
+vetpkg audit-ci --strict --path ~/ember-research-lab/ember-local
+# proxy as a user service (npm route active; pip/cargo routes are pending, see above):
+cp contrib/systemd/vetpkg.service ~/.config/systemd/user/ && systemctl --user enable --now vetpkg
+# findings land in ~/.ember/vetpkg/findings.jsonl (read by ember-agent-monitor's integrate module)
+# periodic CI audit: contrib/systemd/vetpkg-audit-ci.{service,timer}
+```
+
+`audit` only reads `package-lock.json`; the lab's Rust repos (`Cargo.lock`, zero dependencies) and
+ember-local (PEP 723 inline `mcp>=1.22.0,<2`, no lockfile) cannot be audited by `vetpkg audit` yet.
+
 ## Architecture
 
 ```
