@@ -68,6 +68,11 @@ The proxy fetches metadata from the real registry, runs Tier 0 scoring against e
 
 ### `vetpkg audit` — score a lockfile
 
+Supported lockfiles: `package-lock.json` (v2/v3), `Cargo.lock` (v3/v4), `uv.lock` (v1). Every resolved
+package is listed under its lockfile; a source outside the default registry (git, alternate index)
+raises `ResolvedUrlMismatch`. The `Cargo.lock`/`uv.lock` readers are hand-written subsets that fail
+loudly on unknown tables, missing fields or unsupported versions.
+
 ```bash
 vetpkg audit --path ./my-project
 # vetpkg Lockfile Audit
@@ -76,6 +81,9 @@ vetpkg audit --path ./my-project
 # lockfile  : ./my-project/package-lock.json (v3)
 # packages  : 1247
 # elapsed   : 892 ms
+#
+#   npm  accepts@1.3.8
+#   ... (every package is listed)
 #
 # BLOCK  requets@1.0.0  score=0.35
 #         Typosquat { matched: "requests", distance: 0.07 }
@@ -116,8 +124,11 @@ cp contrib/systemd/vetpkg.service ~/.config/systemd/user/ && systemctl --user en
 # periodic CI audit: contrib/systemd/vetpkg-audit-ci.{service,timer}
 ```
 
-`audit` only reads `package-lock.json`; the lab's Rust repos (`Cargo.lock`, zero dependencies) and
-ember-local (PEP 723 inline `mcp>=1.22.0,<2`, no lockfile) cannot be audited by `vetpkg audit` yet.
+`audit` reads `package-lock.json`, `Cargo.lock` and `uv.lock`: `--path DIR` audits every one found in
+DIR and lists them, and errors (exit 2, naming the supported files) when there is none. The lab's Rust
+repos therefore audit today (`vetpkg audit --path ~/ember-research-lab/ember-network`). ember-local
+(PEP 723 inline `mcp>=1.22.0,<2`, no lockfile yet) needs a `uv.lock`; `requirements.txt` with hashes is
+still open (#14).
 
 ## Architecture
 

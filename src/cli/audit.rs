@@ -1,7 +1,11 @@
 //! `vetpkg audit` — lockfile audit subcommand.
 //!
-//! Scope without `--full`: score each resolved (name, version) from
-//! `package-lock.json` using signals that work from lockfile data alone
+//! Lockfiles read: `package-lock.json` (npm v2/v3), `Cargo.lock` (v3/v4) and
+//! `uv.lock` (v1). `--path DIR` audits every supported lockfile found in DIR
+//! and lists which; none found is a hard error naming the supported files.
+//!
+//! Scope without `--full`: score each resolved (name, version) from the
+//! lockfile(s) using signals that work from lockfile data alone
 //! (primarily Typosquat; advisory and fresh-package if metadata is provided).
 //! This intentionally does no network I/O so it runs safely in CI and on air-
 //! gapped hosts.
@@ -10,6 +14,7 @@
 //! and full signal battery. That code path arrives with the upstream-fetch
 //! layer and is stubbed with a clear error today.
 
+use super::lockfile::{parse_cargo_lock, parse_uv_lock, LockEntry};
 use crate::engine::SecurityEngine;
 use crate::json::{parse, JsonValue};
 use crate::types::{Ecosystem, PackageIntel, PolicyConfig, Signal, Verdict};
@@ -27,6 +32,7 @@ pub struct AuditOptions {
 
 #[derive(Debug, Clone)]
 pub struct AuditFinding {
+    pub ecosystem: Ecosystem,
     pub name: String,
     pub version: String,
     pub score: f64,
@@ -35,9 +41,44 @@ pub struct AuditFinding {
 }
 
 #[derive(Debug, Clone)]
+pub struct LockfileInfo {
+    pub path: PathBuf,
+    pub kind: LockfileKind,
+    pub version: u64,
+    pub package_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockfileKind {
+    Npm,
+    Cargo,
+    Uv,
+}
+
+impl LockfileKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LockfileKind::Npm => "package-lock.json",
+            LockfileKind::Cargo => "Cargo.lock",
+            LockfileKind::Uv => "uv.lock",
+        }
+    }
+}
+
+/// Lockfile entries paired with source-derived extra signals.
+type Scored = Vec<(LockEntry, Vec<Signal>)>;
+
+const SUPPORTED_LOCKFILES: [LockfileKind; 3] =
+    [LockfileKind::Npm, LockfileKind::Cargo, LockfileKind::Uv];
+
+#[derive(Debug, Clone)]
 pub struct AuditReport {
+    /// Path of the first lockfile found (kept for single-lockfile callers).
     pub lockfile_path: PathBuf,
+    /// Version of the first lockfile found.
     pub lockfile_version: u64,
+    /// Every lockfile audited, in `SUPPORTED_LOCKFILES` order.
+    pub lockfiles: Vec<LockfileInfo>,
     pub package_count: usize,
     pub findings: Vec<AuditFinding>,
     pub elapsed_ms: u128,
@@ -108,47 +149,48 @@ pub fn audit(opts: &AuditOptions) -> Result<AuditReport, String> {
     if opts.full {
         return Err("audit --full requires upstream fetching (not yet wired; coming in Phase 1 integration)".into());
     }
-    let lockfile_path = resolve_lockfile(&opts.path)?;
-    let text =
-        fs::read_to_string(&lockfile_path).map_err(|e| format!("read {:?}: {e}", lockfile_path))?;
-    let root = parse(&text).map_err(|e| format!("parse {:?}: {e}", lockfile_path))?;
-    let lockfile_version = detect_lockfile_version(&root)?;
-
-    let entries = extract_entries(&root, lockfile_version)?;
+    let found = resolve_lockfiles(&opts.path)?;
+    let mut lockfiles = Vec::with_capacity(found.len());
+    let mut all: Scored = Vec::new();
+    for (path, kind) in found {
+        let text = fs::read_to_string(&path).map_err(|e| format!("read {:?}: {e}", path))?;
+        let (version, entries) = match kind {
+            LockfileKind::Npm => load_npm(&text, &path)?,
+            LockfileKind::Cargo => {
+                let (v, e) =
+                    parse_cargo_lock(&text).map_err(|e| format!("parse {:?}: {e}", path))?;
+                (v, with_source_signals(e, "crates.io"))
+            }
+            LockfileKind::Uv => {
+                let (v, e) = parse_uv_lock(&text).map_err(|e| format!("parse {:?}: {e}", path))?;
+                (v, with_source_signals(e, "pypi.org"))
+            }
+        };
+        lockfiles.push(LockfileInfo {
+            path,
+            kind,
+            version,
+            package_count: entries.len(),
+        });
+        all.extend(entries);
+    }
 
     let engine = SecurityEngine::new(PolicyConfig::default());
     let start = Instant::now();
-    let mut findings: Vec<AuditFinding> = Vec::with_capacity(entries.len());
-
-    // Lockfile-tampering sweep: collate resolved-URL mismatches by package
-    // name so we can merge them into the per-package scoring below.
-    let npm_upstream = PolicyConfig::default().npm_upstream;
-    let expected_host = npm_upstream
-        .strip_prefix("https://")
-        .or_else(|| npm_upstream.strip_prefix("http://"))
-        .map(|s| s.trim_end_matches('/').to_string())
-        .unwrap_or_else(|| "registry.npmjs.org".to_string());
-    let resolved_signals = check_resolved_urls(&root, &expected_host);
-    let mut resolved_by_name: std::collections::HashMap<String, Vec<Signal>> =
-        std::collections::HashMap::new();
-    for s in resolved_signals {
-        if let Signal::ResolvedUrlMismatch { name, .. } = &s {
-            resolved_by_name.entry(name.clone()).or_default().push(s);
-        }
-    }
-
-    for (name, version) in &entries {
-        let intel = intel_from_lockfile(name, version);
+    let mut findings: Vec<AuditFinding> = Vec::with_capacity(all.len());
+    for (entry, extra) in all {
+        let intel = intel_from_lockfile(entry.ecosystem, &entry.name, &entry.version);
         let mut score = engine.score(&intel);
-        if let Some(extra) = resolved_by_name.remove(name) {
+        if !extra.is_empty() {
             let extra_weight: f64 = extra.iter().map(|s| s.weight()).sum();
             score.score = (score.score + extra_weight).min(1.0);
             score.signals.extend(extra);
         }
         let verdict = engine.verdict(score.score);
         findings.push(AuditFinding {
-            name: name.clone(),
-            version: version.clone(),
+            ecosystem: entry.ecosystem,
+            name: entry.name,
+            version: entry.version,
             score: score.score,
             verdict,
             signals: score.signals,
@@ -163,26 +205,102 @@ pub fn audit(opts: &AuditOptions) -> Result<AuditReport, String> {
     let elapsed_ms = start.elapsed().as_millis();
 
     Ok(AuditReport {
-        lockfile_path,
-        lockfile_version,
-        package_count: entries.len(),
+        lockfile_path: lockfiles[0].path.clone(),
+        lockfile_version: lockfiles[0].version,
+        package_count: findings.len(),
+        lockfiles,
         findings,
         elapsed_ms,
     })
 }
 
-fn resolve_lockfile(path: &Path) -> Result<PathBuf, String> {
+/// Find the lockfile(s) to audit. A file path is taken as-is (kind chosen by
+/// file name; any unrecognised name is read as an npm lockfile, which keeps
+/// fixture files like `lockfile.json` working). A directory yields every
+/// supported lockfile directly inside it; none is an error.
+fn resolve_lockfiles(path: &Path) -> Result<Vec<(PathBuf, LockfileKind)>, String> {
     if path.is_file() {
-        return Ok(path.to_path_buf());
+        let kind = SUPPORTED_LOCKFILES
+            .iter()
+            .copied()
+            .find(|k| path.file_name().and_then(|n| n.to_str()) == Some(k.as_str()))
+            .unwrap_or(LockfileKind::Npm);
+        return Ok(vec![(path.to_path_buf(), kind)]);
     }
-    let direct = path.join("package-lock.json");
-    if direct.is_file() {
-        return Ok(direct);
+    let found: Vec<_> = SUPPORTED_LOCKFILES
+        .iter()
+        .map(|k| (path.join(k.as_str()), *k))
+        .filter(|(p, _)| p.is_file())
+        .collect();
+    if found.is_empty() {
+        let supported: Vec<_> = SUPPORTED_LOCKFILES.iter().map(|k| k.as_str()).collect();
+        return Err(format!(
+            "no supported lockfile at {:?} (looked for: {}; pass --path pointing to a project root or the lockfile itself)",
+            path,
+            supported.join(", ")
+        ));
     }
-    Err(format!(
-        "no package-lock.json at {:?} (pass --path pointing to a project root or the lockfile itself)",
-        path
-    ))
+    Ok(found)
+}
+
+/// Attach a `ResolvedUrlMismatch` signal to each entry whose source is not
+/// the ecosystem's default registry.
+fn with_source_signals(entries: Vec<LockEntry>, expected: &str) -> Scored {
+    entries
+        .into_iter()
+        .map(|e| {
+            let sig = e
+                .foreign_source
+                .as_ref()
+                .map(|src| {
+                    vec![Signal::ResolvedUrlMismatch {
+                        name: e.name.clone(),
+                        expected_registry: expected.to_string(),
+                        actual_url: src.clone(),
+                    }]
+                })
+                .unwrap_or_default();
+            (e, sig)
+        })
+        .collect()
+}
+
+fn load_npm(text: &str, path: &Path) -> Result<(u64, Scored), String> {
+    let root = parse(text).map_err(|e| format!("parse {:?}: {e}", path))?;
+    let lockfile_version = detect_lockfile_version(&root)?;
+    let entries = extract_entries(&root, lockfile_version)?;
+
+    // Lockfile-tampering sweep: collate resolved-URL mismatches by package
+    // name so they merge into the per-package scoring.
+    let npm_upstream = PolicyConfig::default().npm_upstream;
+    let expected_host = npm_upstream
+        .strip_prefix("https://")
+        .or_else(|| npm_upstream.strip_prefix("http://"))
+        .map(|s| s.trim_end_matches('/').to_string())
+        .unwrap_or_else(|| "registry.npmjs.org".to_string());
+    let mut resolved_by_name: std::collections::HashMap<String, Vec<Signal>> =
+        std::collections::HashMap::new();
+    for s in check_resolved_urls(&root, &expected_host) {
+        if let Signal::ResolvedUrlMismatch { name, .. } = &s {
+            resolved_by_name.entry(name.clone()).or_default().push(s);
+        }
+    }
+    let out = entries
+        .into_iter()
+        .map(|(name, version)| {
+            let extra = resolved_by_name.remove(&name).unwrap_or_default();
+            (
+                LockEntry {
+                    ecosystem: Ecosystem::Npm,
+                    name,
+                    version,
+                    foreign_source: None,
+                },
+                extra,
+            )
+        })
+        .collect();
+    Ok((lockfile_version, out))
 }
 
 fn detect_lockfile_version(root: &JsonValue) -> Result<u64, String> {
@@ -296,9 +414,9 @@ pub fn extract_name_from_path(path: &str) -> Option<String> {
     }
 }
 
-fn intel_from_lockfile(name: &str, version: &str) -> PackageIntel {
+fn intel_from_lockfile(ecosystem: Ecosystem, name: &str, version: &str) -> PackageIntel {
     PackageIntel {
-        ecosystem: Some(Ecosystem::Npm),
+        ecosystem: Some(ecosystem),
         name: name.to_string(),
         version: version.to_string(),
         ..Default::default()
@@ -314,6 +432,10 @@ pub fn report_as_json(r: &AuditReport) -> String {
         // `signal_short_label` rather than `{:?}` Debug, which is unstable
         // across releases and not valid JSON-friendly output.
         findings.push(JsonValue::Object(vec![
+            (
+                "ecosystem".into(),
+                JsonValue::Str(f.ecosystem.as_str().into()),
+            ),
             ("package".into(), JsonValue::Str(f.name.clone())),
             ("version".into(), JsonValue::Str(f.version.clone())),
             ("score".into(), JsonValue::Number(f.score)),
@@ -343,6 +465,28 @@ pub fn report_as_json(r: &AuditReport) -> String {
             JsonValue::Number(r.lockfile_version as f64),
         ),
         (
+            "lockfiles".into(),
+            JsonValue::Array(
+                r.lockfiles
+                    .iter()
+                    .map(|l| {
+                        JsonValue::Object(vec![
+                            (
+                                "path".into(),
+                                JsonValue::Str(l.path.to_string_lossy().into_owned()),
+                            ),
+                            ("kind".into(), JsonValue::Str(l.kind.as_str().into())),
+                            ("version".into(), JsonValue::Number(l.version as f64)),
+                            (
+                                "package_count".into(),
+                                JsonValue::Number(l.package_count as f64),
+                            ),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
             "package_count".into(),
             JsonValue::Number(r.package_count as f64),
         ),
@@ -364,13 +508,29 @@ fn print_human(r: &AuditReport) {
     println!("vetpkg Lockfile Audit");
     println!("═════════════════════");
     println!();
-    println!(
-        "lockfile  : {} (v{})",
-        r.lockfile_path.display(),
-        r.lockfile_version
-    );
+    for l in &r.lockfiles {
+        println!(
+            "lockfile  : {} ({} v{}, {} packages)",
+            l.path.display(),
+            l.kind.as_str(),
+            l.version,
+            l.package_count
+        );
+    }
     println!("packages  : {}", r.package_count);
     println!("elapsed   : {} ms", r.elapsed_ms);
+    println!();
+    let mut listed: Vec<_> = r.findings.iter().collect();
+    listed.sort_by(|a, b| {
+        (a.ecosystem.as_str(), &a.name, &a.version).cmp(&(
+            b.ecosystem.as_str(),
+            &b.name,
+            &b.version,
+        ))
+    });
+    for f in listed {
+        println!("  {}  {}@{}", f.ecosystem.as_str(), f.name, f.version);
+    }
     println!();
     let (b, w, _a) = r.counts();
     let mut shown = 0;
@@ -448,6 +608,89 @@ mod tests {
             let root = parse(&txt).unwrap();
             assert_eq!(detect_lockfile_version(&root).unwrap(), v);
         }
+    }
+
+    fn tmpdir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("vetpkg-audit-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn opts(path: PathBuf) -> AuditOptions {
+        AuditOptions {
+            path,
+            full: false,
+            as_json: false,
+            fail_on_warn: false,
+        }
+    }
+
+    fn fixture(name: &str) -> String {
+        fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/lockfiles")
+                .join(name),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn dir_without_lockfile_errors_listing_supported() {
+        let d = tmpdir("none");
+        let err = audit(&opts(d.clone())).unwrap_err();
+        for k in ["package-lock.json", "Cargo.lock", "uv.lock"] {
+            assert!(err.contains(k), "{err}");
+        }
+        assert!(run(vec!["--path".into(), d.to_string_lossy().into_owned()]).is_err());
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn cargo_zero_deps_dir_audits_clean() {
+        let d = tmpdir("zero");
+        fs::write(d.join("Cargo.lock"), fixture("cargo-zero-deps.lock")).unwrap();
+        let r = audit(&opts(d.clone())).unwrap();
+        assert_eq!(r.lockfiles.len(), 1);
+        assert_eq!(r.lockfiles[0].kind, LockfileKind::Cargo);
+        assert_eq!(r.package_count, 1);
+        assert_eq!(r.findings[0].name, "ember-network");
+        assert_eq!(r.counts().0, 0);
+        assert_eq!(
+            run(vec!["--path".into(), d.to_string_lossy().into_owned()]).unwrap(),
+            0
+        );
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn mixed_dir_lists_every_lockfile_and_flags_foreign_source() {
+        let d = tmpdir("mixed");
+        fs::write(d.join("Cargo.lock"), fixture("cargo-deps.lock")).unwrap();
+        fs::write(d.join("uv.lock"), fixture("uv.lock")).unwrap();
+        let r = audit(&opts(d.clone())).unwrap();
+        let kinds: Vec<_> = r.lockfiles.iter().map(|l| l.kind).collect();
+        assert_eq!(kinds, [LockfileKind::Cargo, LockfileKind::Uv]);
+        assert_eq!(r.package_count, 5 + 4);
+        for n in ["weird-git", "sneaky"] {
+            let f = r.findings.iter().find(|f| f.name == n).unwrap();
+            assert!(f
+                .signals
+                .iter()
+                .any(|s| matches!(s, Signal::ResolvedUrlMismatch { .. })));
+        }
+        assert!(report_as_json(&r).contains("\"uv.lock\""));
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn malformed_cargo_lock_fails_loudly() {
+        let d = tmpdir("bad");
+        fs::write(d.join("Cargo.lock"), "version = 3\n[surprise]\n").unwrap();
+        assert!(audit(&opts(d.clone()))
+            .unwrap_err()
+            .contains("unsupported table"));
+        fs::remove_dir_all(d).unwrap();
     }
 
     #[test]
