@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- The proxy never wrote `~/.ember/vetpkg/findings.jsonl` (`record_verdict` had no caller), so the
+  agent-monitor integration surface was always empty. Warn/Block verdicts for metadata and tarball
+  analysis are now recorded (test: `tests/findings_log_e2e.rs`).
+- `clippy::question_mark` in `signals/publish_anomaly.rs` (rustc 1.99) failed the `-D warnings` CI bar.
+
+### Added
+- `contrib/systemd/` units (proxy daemon, weekly `audit-ci --strict`) and a README "Dogfood" section.
 ### Changed
 - CI: every job has `timeout-minutes` (whale-signal#258).
 
