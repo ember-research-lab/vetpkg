@@ -7,6 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- Docs claimed `vetpkg audit --full` (upstream metadata) shipped; it returns "not yet wired" (`src/cli/audit.rs`). README now marks it not implemented and the 0.3.0 entry is annotated; the existing test `full_returns_clear_error_until_implemented` pins the error until the fetch path lands. Fixes #6.
 - The proxy never wrote `~/.ember/vetpkg/findings.jsonl` (`record_verdict` had no caller), so the
   agent-monitor integration surface was always empty. Warn/Block verdicts for metadata and tarball
   analysis are now recorded (test: `tests/findings_log_e2e.rs`).
@@ -124,7 +125,7 @@ directly exercising the most serious findings.
     cross-ecosystem correlation multipliers (maintainer, name, URL),
     `InfiniteLoopDetection`, `BinShadow`.
 - **Lockfile audit** (`vetpkg audit`) — npm v2/v3, offline-only by
-  default, `--full` for upstream metadata, `--json`, `--fail-on-warn`
+  default, `--full` for upstream metadata (listed here in error: not wired, see Unreleased), `--json`, `--fail-on-warn`
   for CI gating. Includes resolved-URL tampering detection.
 - **CI workflow audit** (`vetpkg audit-ci`) — flags unpinned actions,
   permission-scope issues, secret exposure, `upload-artifact` with

@@ -91,7 +91,7 @@ vetpkg audit --path ./my-project
 # Summary: 1 blocked, 0 warnings, 1246 clean
 ```
 
-Flags: `--path DIR|FILE` (default `.`), `--full` (fetch upstream metadata for each entry — slower, more accurate), `--json` (machine-readable), `--fail-on-warn` (exit 1 on Warn verdicts for CI gating).
+Flags: `--path DIR|FILE` (default `.`), `--full` (**not implemented yet**: upstream-metadata fetch is not wired and the flag exits with an error; tracked in #6), `--json` (machine-readable), `--fail-on-warn` (exit 1 on Warn verdicts for CI gating).
 
 ### `vetpkg audit-ci` — audit GitHub Actions workflows
 
