@@ -146,10 +146,7 @@ pub fn is_safe_url(s: &str) -> bool {
     // Reject userinfo in the authority. Everything up to the first `/`
     // past the scheme is authority; if it contains `@`, it has userinfo.
     let authority_end = rest.find('/').unwrap_or(rest.len());
-    if rest[..authority_end].contains('@') {
-        return false;
-    }
-    true
+    !rest[..authority_end].contains('@')
 }
 
 pub fn unique_temp_subdir(prefix: &str) -> PathBuf {

@@ -169,10 +169,7 @@ pub fn is_comparable_with_context(
     }
     let min_len = al.min(bl);
     let max_edits = if min_len < 10 { 1 } else { 2 };
-    if damerau_levenshtein(candidate, corpus_entry) > max_edits {
-        return false;
-    }
-    true
+    damerau_levenshtein(candidate, corpus_entry) <= max_edits
 }
 
 fn is_delim(c: char) -> bool {

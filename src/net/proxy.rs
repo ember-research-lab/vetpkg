@@ -461,10 +461,7 @@ fn is_safe_tarball_filename(s: &str) -> bool {
     }
     // "..*.tgz" would satisfy the charset above but traverse the path —
     // reject any run of leading dots.
-    if s.starts_with('.') {
-        return false;
-    }
-    true
+    !s.starts_with('.')
 }
 
 fn stream_tarball_forward(stream: &mut TcpStream, url: &str) -> std::io::Result<()> {
