@@ -13,7 +13,7 @@ vetpkg is a supply-chain security tool. Its own supply chain is the thing attack
 
 ## Reporting a vulnerability
 
-Please email `aemberlab305@gmail.com` with subject `vetpkg security: <one-line summary>`. Include:
+Please email `emberresearchlab@gmail.com` with subject `vetpkg security: <one-line summary>`. Include:
 
 - Affected version (tag or commit SHA of the repository you built from)
 - Reproduction steps — ideally a minimal fixture demonstrating the issue
