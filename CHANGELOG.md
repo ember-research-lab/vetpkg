@@ -11,6 +11,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   agent-monitor integration surface was always empty. Warn/Block verdicts for metadata and tarball
   analysis are now recorded (test: `tests/findings_log_e2e.rs`).
 - `clippy::question_mark` in `signals/publish_anomaly.rs` (rustc 1.99) failed the `-D warnings` CI bar.
+- `clippy::needless_bool` (rustc 1.100) in `net/proxy.rs`, `platform.rs`, `signals/typosquat.rs` failed the `-D warnings` CI bar on stable.
 
 ### Added
 - `vetpkg audit` reads `Cargo.lock` (v3/v4) and `uv.lock` (v1) besides `package-lock.json`; `--path DIR`
