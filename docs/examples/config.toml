@@ -5,8 +5,8 @@
 #            (or $HOME/.config/vetpkg/config.toml)
 #   Windows: %APPDATA%\vetpkg\config.toml
 #
-# Run `vetpkg init` to write this file + the default pattern files.
-# Pass --config <path> to the daemon/CLI to use a different location.
+# `vetpkg init` creates this directory; it does not write this file yet.
+# Pass --config <path> to `vetpkg daemon` to load a config file.
 
 # TCP port the proxy listens on. Always binds 127.0.0.1 — vetpkg never
 # listens on an external interface by design.

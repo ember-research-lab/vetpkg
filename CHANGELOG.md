@@ -7,6 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- Docs correction: README no longer implies `vetpkg audit --full` works. It returns "not yet wired" (`src/cli/audit.rs`), so the 0.3.0 entry listing `--full` as shipped was wrong. README also gains a Known gaps list (issue 8) and the lab-specific Dogfood section moved to `docs/dogfood.md`. The `init`, `status` and daemon-flag lines and the package description now match the code, and the unverified reproducible-build sentence is removed.
 - The proxy never wrote `~/.ember/vetpkg/findings.jsonl` (`record_verdict` had no caller), so the
   agent-monitor integration surface was always empty. Warn/Block verdicts for metadata and tarball
   analysis are now recorded (test: `tests/findings_log_e2e.rs`).
@@ -22,7 +23,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `requirements.txt` with hashes is still open (#14).
 - `contrib/systemd/` units (proxy daemon, weekly `audit-ci --strict`) and a README "Dogfood" section.
 ### Changed
-- CI: every job has `timeout-minutes` (whale-signal#258).
+- CI: every job has `timeout-minutes` (an internal incident).
 
 ### Added
 - New `PublishAnomalyKind::DormantMaintainer` signal. Catches the

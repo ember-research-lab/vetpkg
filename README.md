@@ -36,7 +36,7 @@ cargo build --release
 
 ### Release binaries
 
-Release tags on GitHub attach binaries for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, and `x86_64-pc-windows-msvc`, each with a `.sha256` companion. Verify the hash out-of-band before running. The build is reproducible from the source at the tagged commit.
+Release tags on GitHub attach binaries for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, and `x86_64-pc-windows-msvc`, each with a `.sha256` companion. Verify the hash out-of-band before running.
 
 ## Platform support
 
@@ -53,6 +53,8 @@ vetpkg daemon
 #   pip    /pip/*     adapter ready, proxy route pending
 #   cargo  /cargo/*   adapter ready, proxy route pending
 ```
+
+Flags: `--port N` (default 9451), `--config PATH` (load a config file; see [`docs/examples/config.toml`](docs/examples/config.toml)).
 
 Point your package manager at the proxy:
 
@@ -91,7 +93,7 @@ vetpkg audit --path ./my-project
 # Summary: 1 blocked, 0 warnings, 1246 clean
 ```
 
-Flags: `--path DIR|FILE` (default `.`), `--full` (fetch upstream metadata for each entry — slower, more accurate), `--json` (machine-readable), `--fail-on-warn` (exit 1 on Warn verdicts for CI gating).
+Flags: `--path DIR|FILE` (default `.`), `--full` (**not implemented yet**: the upstream-metadata fetch is not wired, so the flag exits with an error; tracked in issue 6, https://github.com/ember-research-lab/vetpkg/issues/6), `--json` (machine-readable), `--fail-on-warn` (exit 1 on Warn verdicts for CI gating).
 
 ### `vetpkg audit-ci` — audit GitHub Actions workflows
 
@@ -109,26 +111,15 @@ Flags: `--path DIR`, `--online` (fetch GitHub tag refs for mutation detection), 
 
 ### `vetpkg status`, `vetpkg policy`, `vetpkg init`
 
-- `status` — check if the daemon is running on the configured port
+- `status` — check if a daemon is listening on the default port, 9451 (it does not follow `daemon --port`)
 - `policy` — print effective threshold and upstream configuration
-- `init` — write default config + pattern files to `{config_dir}/vetpkg/`
+- `init` — create the config directory `{config_dir}/vetpkg/` (it does not write default config or pattern files yet)
 
-## Dogfood (Ember lab)
+Only the top-level `vetpkg --help` exists; subcommands do not take `--help`.
 
-```bash
-# lockfile-less CI audit over the lab repos (exit 1 on any Medium+ with --strict):
-vetpkg audit-ci --strict --path ~/ember-research-lab/ember-local
-# proxy as a user service (npm route active; pip/cargo routes are pending, see above):
-cp contrib/systemd/vetpkg.service ~/.config/systemd/user/ && systemctl --user enable --now vetpkg
-# findings land in ~/.ember/vetpkg/findings.jsonl (read by ember-agent-monitor's integrate module)
-# periodic CI audit: contrib/systemd/vetpkg-audit-ci.{service,timer}
-```
+## Dogfood
 
-`audit` reads `package-lock.json`, `Cargo.lock` and `uv.lock`: `--path DIR` audits every one found in
-DIR and lists them, and errors (exit 2, naming the supported files) when there is none. The lab's Rust
-repos therefore audit today (`vetpkg audit --path ~/ember-research-lab/ember-network`). ember-local
-(PEP 723 inline `mcp>=1.22.0,<2`, no lockfile yet) needs a `uv.lock`; `requirements.txt` with hashes is
-still open (#14).
+The lab runs vetpkg on its own repos; that setup is written up as an example in [`docs/dogfood.md`](docs/dogfood.md).
 
 ## Architecture
 
@@ -184,6 +175,14 @@ Signal weights and thresholds live in `src/types.rs`. Pattern corpora live in `d
 | TeamPCP | 2026 | Cross-ecosystem coordinated compromise | ✅ Maintainer/Name/URL correlation multipliers |
 | tj-actions | 2025 | GitHub Actions PAT theft → tag hijack → CI exfil | ✅ `audit-ci --online` tag-mutation detection |
 | SolarWinds | 2020 | Build server implant → code injection at compile | ❌ Out of scope — vendor-side SLSA responsibility |
+
+### Known gaps
+
+Three attack classes are not detected and are kept as `#[ignore]` tests in `tests/attack_matrix.rs` (see issue 8, https://github.com/ember-research-lab/vetpkg/issues/8):
+
+- protestware (geo-conditional behaviour, e.g. node-ipc 2022)
+- time-delayed triggers (`Date.now()` comparisons, scheduled callbacks)
+- install-time prototype pollution
 
 SolarWinds-class attacks (vendor build system compromise) are explicitly out of scope. That requires reproducible builds and SLSA attestation upstream of the proxy.
 
